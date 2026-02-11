@@ -43,7 +43,7 @@ Optional environment variables:
 - `TMUX_MOBILE_SOCKET_NAME`: Use a dedicated tmux socket name (`tmux -L`) for isolation
 - `TMUX_MOBILE_SOCKET_PATH`: Use an explicit tmux socket path (`tmux -S`)
 - `TMUX_MOBILE_DEBUG_LOG`: Alternative way to enable debug log file output
-- `TMUX_MOBILE_USE_NODE_PTY=1`: Opt back into `node-pty` on Unix (default uses `script(1)` fallback for reliability)
+- `TMUX_MOBILE_FORCE_SCRIPT_PTY=1`: Force the Unix `script(1)` PTY fallback
 
 ## Test Harness
 

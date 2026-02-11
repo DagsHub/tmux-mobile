@@ -1,10 +1,43 @@
+import fs from "node:fs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import os from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
 import * as pty from "node-pty";
 import type { PtyFactory, PtyProcess } from "./pty-adapter.js";
 import { toFlatStringEnv, withoutTmuxEnv } from "../util/env.js";
 
+const require = createRequire(import.meta.url);
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\"'\"'")}'`;
+
+const ensureNodePtySpawnHelperExecutable = (
+  logger?: Pick<Console, "log" | "error">
+): void => {
+  if (os.platform() === "win32") {
+    return;
+  }
+
+  try {
+    const unixTerminalPath = require.resolve("node-pty/lib/unixTerminal.js");
+    const rootDir = path.resolve(path.dirname(unixTerminalPath), "..");
+    const candidates = [
+      path.join(rootDir, "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper"),
+      path.join(rootDir, "build", "Release", "spawn-helper"),
+      path.join(rootDir, "build", "Debug", "spawn-helper")
+    ];
+
+    for (const candidate of candidates) {
+      if (!fs.existsSync(candidate)) {
+        continue;
+      }
+      fs.chmodSync(candidate, 0o755);
+      logger?.log("node-pty spawn-helper is executable", candidate);
+      return;
+    }
+  } catch (error) {
+    logger?.error("unable to ensure node-pty spawn-helper permissions", error);
+  }
+};
 
 class NodePtyProcess implements PtyProcess {
   public constructor(private readonly process: pty.IPty) {}
@@ -60,8 +93,8 @@ export class NodePtyFactory implements PtyFactory {
   private readonly forceScriptFallback: boolean;
 
   public constructor(private readonly logger?: Pick<Console, "log" | "error">) {
-    this.forceScriptFallback =
-      os.platform() !== "win32" && process.env.TMUX_MOBILE_USE_NODE_PTY !== "1";
+    this.forceScriptFallback = process.env.TMUX_MOBILE_FORCE_SCRIPT_PTY === "1";
+    ensureNodePtySpawnHelperExecutable(this.logger);
   }
 
   public spawnTmuxAttach(session: string): PtyProcess {
