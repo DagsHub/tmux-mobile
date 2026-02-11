@@ -11,6 +11,7 @@ import type { CliArgs, RuntimeConfig } from "./config.js";
 import { NodePtyFactory } from "./pty/node-pty-adapter.js";
 import { createTmuxMobileServer } from "./server.js";
 import { TmuxCliExecutor } from "./tmux/cli-executor.js";
+import { createLogger } from "./util/file-logger.js";
 
 const parseCliArgs = async (): Promise<CliArgs> => {
   const argv = await yargs(hideBin(process.argv))
@@ -40,6 +41,10 @@ const parseCliArgs = async (): Promise<CliArgs> => {
       default: 1000,
       describe: "Default scrollback capture lines"
     })
+    .option("debug-log", {
+      type: "string",
+      describe: "Write debug logs to a file"
+    })
     .strict()
     .help()
     .parseAsync();
@@ -49,7 +54,8 @@ const parseCliArgs = async (): Promise<CliArgs> => {
     password: argv.password,
     tunnel: argv.tunnel,
     session: argv.session,
-    scrollback: argv.scrollback
+    scrollback: argv.scrollback,
+    debugLog: argv.debugLog
   };
 };
 
@@ -74,6 +80,8 @@ const printConnectionInfo = (
 const main = async (): Promise<void> => {
   const args = await parseCliArgs();
   const authService = new AuthService(args.password);
+  const debugLogPath = args.debugLog ?? process.env.TMUX_MOBILE_DEBUG_LOG;
+  const logger = createLogger(debugLogPath);
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const frontendDir = path.resolve(cliDir, "../frontend");
 
@@ -92,14 +100,20 @@ const main = async (): Promise<void> => {
   const cloudflaredManager = new CloudflaredManager();
   const tmux = new TmuxCliExecutor({
     socketName: process.env.TMUX_MOBILE_SOCKET_NAME,
-    socketPath: process.env.TMUX_MOBILE_SOCKET_PATH
+    socketPath: process.env.TMUX_MOBILE_SOCKET_PATH,
+    logger
   });
-  const ptyFactory = new NodePtyFactory();
+  const ptyFactory = new NodePtyFactory(logger);
   const runningServer = createTmuxMobileServer(config, {
     tmux,
     ptyFactory,
-    authService
+    authService,
+    logger
   });
+
+  if (debugLogPath) {
+    logger.log(`Debug log file: ${path.resolve(debugLogPath)}`);
+  }
 
   await runningServer.start();
 
@@ -115,16 +129,29 @@ const main = async (): Promise<void> => {
 
   printConnectionInfo(`http://localhost:${args.port}`, tunnelUrl, authService.token);
 
+  let shutdownPromise: Promise<void> | null = null;
   const shutdown = async (): Promise<void> => {
-    cloudflaredManager.stop();
-    await runningServer.stop();
-    process.exit(0);
+    if (shutdownPromise) {
+      await shutdownPromise;
+      return;
+    }
+
+    shutdownPromise = (async () => {
+      cloudflaredManager.stop();
+      await runningServer.stop();
+    })();
+
+    try {
+      await shutdownPromise;
+    } finally {
+      process.exit(0);
+    }
   };
 
-  process.on("SIGINT", () => {
+  process.once("SIGINT", () => {
     void shutdown();
   });
-  process.on("SIGTERM", () => {
+  process.once("SIGTERM", () => {
     void shutdown();
   });
 };

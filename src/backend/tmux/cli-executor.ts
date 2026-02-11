@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { parsePanes, parseSessions, parseWindows } from "./parser.js";
 import type { TmuxGateway } from "./types.js";
+import { withoutTmuxEnv } from "../util/env.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +15,7 @@ interface TmuxCliExecutorOptions {
   socketPath?: string;
   tmuxBinary?: string;
   timeoutMs?: number;
+  logger?: Pick<Console, "log" | "error">;
 }
 
 const isNoServerRunningError = (message: string): boolean =>
@@ -25,6 +27,8 @@ export class TmuxCliExecutor implements TmuxGateway {
   private readonly tmuxBinary: string;
   private readonly tmuxArgsPrefix: string[];
   private readonly timeoutMs: number;
+  private readonly logger?: Pick<Console, "log" | "error">;
+  private readonly traceTmux: boolean;
 
   public constructor(options: TmuxCliExecutorOptions = {}) {
     if (options.socketName && options.socketPath) {
@@ -38,13 +42,19 @@ export class TmuxCliExecutor implements TmuxGateway {
         ? ["-L", options.socketName]
         : [];
     this.timeoutMs = options.timeoutMs ?? 5_000;
+    this.logger = options.logger;
+    this.traceTmux = process.env.TMUX_MOBILE_TRACE_TMUX === "1";
   }
 
   private async runTmux(args: string[]): Promise<string> {
     const finalArgs = [...this.tmuxArgsPrefix, ...args];
     try {
+      if (this.traceTmux) {
+        this.logger?.log("[tmux]", this.tmuxBinary, finalArgs.join(" "));
+      }
       const { stdout } = await execFileAsync(this.tmuxBinary, finalArgs, {
-        timeout: this.timeoutMs
+        timeout: this.timeoutMs,
+        env: withoutTmuxEnv(process.env)
       });
       return stdout.trim();
     } catch (error) {

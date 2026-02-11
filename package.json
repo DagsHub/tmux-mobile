@@ -19,6 +19,7 @@
     "build:frontend": "vite build --config vite.config.ts",
     "typecheck": "tsc -p tsconfig.backend.json --noEmit && tsc -p tsconfig.frontend.json --noEmit",
     "test:smoke": "REAL_TMUX_SMOKE=1 vitest run tests/smoke/real-tmux.test.ts",
+    "test:e2e": "npm run build && playwright test",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepack": "npm run build"
@@ -39,6 +40,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.1",
     "@testing-library/react": "^16.2.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/express": "^4.17.21",

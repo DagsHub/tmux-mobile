@@ -29,6 +29,11 @@ interface PaneNode {
 
 let paneCounter = 20;
 
+interface FakeTmuxOptions {
+  attachedSession?: string;
+  failSwitchClient?: boolean;
+}
+
 const buildDefaultSession = (name: string): SessionNode => ({
   name,
   attached: false,
@@ -53,10 +58,15 @@ const buildDefaultSession = (name: string): SessionNode => ({
 
 export class FakeTmuxGateway implements TmuxGateway {
   private sessions: SessionNode[] = [];
+  private failSwitchClient = false;
   public readonly calls: string[] = [];
 
-  public constructor(seedSessions: string[] = []) {
+  public constructor(seedSessions: string[] = [], options: FakeTmuxOptions = {}) {
     this.sessions = seedSessions.map((name) => buildDefaultSession(name));
+    this.failSwitchClient = options.failSwitchClient ?? false;
+    if (options.attachedSession) {
+      this.markAttached(options.attachedSession);
+    }
   }
 
   public listSessions(): Promise<TmuxSessionSummary[]> {
@@ -113,9 +123,10 @@ export class FakeTmuxGateway implements TmuxGateway {
 
   public async switchClient(sessionName: string): Promise<void> {
     this.calls.push(`switchClient:${sessionName}`);
-    for (const session of this.sessions) {
-      session.attached = session.name === sessionName;
+    if (this.failSwitchClient) {
+      throw new Error("no current client");
     }
+    this.markAttached(sessionName);
   }
 
   public async newWindow(sessionName: string): Promise<void> {
@@ -198,6 +209,16 @@ export class FakeTmuxGateway implements TmuxGateway {
   public async capturePane(paneId: string, lines: number): Promise<string> {
     this.calls.push(`capturePane:${paneId}:${lines}`);
     return `captured ${lines} lines for ${paneId}`;
+  }
+
+  public setFailSwitchClient(value: boolean): void {
+    this.failSwitchClient = value;
+  }
+
+  private markAttached(sessionName: string): void {
+    for (const session of this.sessions) {
+      session.attached = session.name === sessionName;
+    }
   }
 
   private findSession(name: string): SessionNode {

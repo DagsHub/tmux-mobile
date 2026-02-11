@@ -91,8 +91,10 @@ export const App = () => {
 
   const sendControl = (payload: Record<string, unknown>): void => {
     if (controlSocketRef.current?.readyState !== WebSocket.OPEN) {
+      setErrorMessage("control websocket disconnected");
       return;
     }
+    setErrorMessage("");
     controlSocketRef.current.send(JSON.stringify(payload));
   };
 
@@ -198,6 +200,9 @@ export const App = () => {
 
     socket.onclose = () => {
       setStatusMessage("terminal disconnected");
+    };
+    socket.onerror = () => {
+      setErrorMessage("terminal websocket error");
     };
 
     terminalSocketRef.current = socket;
@@ -305,13 +310,18 @@ export const App = () => {
       fontFamily: "Menlo, Monaco, 'Courier New', monospace",
       fontSize: 14,
       theme: {
-        background: "#0d1117"
+        background: "#0d1117",
+        foreground: "#d1e4ff",
+        cursor: "#93c5fd"
       }
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(terminalContainerRef.current);
-    fitAddon.fit();
+    requestAnimationFrame(() => {
+      fitAddon.fit();
+      terminal.focus();
+    });
 
     const disposable = terminal.onData((data) => {
       sendTerminal(data);
@@ -373,7 +383,11 @@ export const App = () => {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button onClick={() => setDrawerOpen((value) => !value)} className="icon-btn">
+        <button
+          onClick={() => setDrawerOpen((value) => !value)}
+          className="icon-btn"
+          data-testid="drawer-toggle"
+        >
           =
         </button>
         <div className="top-title">Session: {attachedSession || activeSession?.name || "-"}</div>
@@ -387,7 +401,9 @@ export const App = () => {
         </div>
       </header>
 
-      <main className="terminal-wrap" ref={terminalContainerRef} />
+      <main className="terminal-wrap">
+        <div className="terminal-host" ref={terminalContainerRef} data-testid="terminal-host" />
+      </main>
 
       <section className="toolbar">
         <div className="toolbar-row">
@@ -451,103 +467,137 @@ export const App = () => {
       )}
 
       {drawerOpen && (
-        <aside className="drawer">
-          <h3>Sessions</h3>
-          <ul>
-            {snapshot.sessions.map((session) => (
-              <li key={session.name}>
-                <button
-                  onClick={() => sendControl({ type: "select_session", session: session.name })}
-                  className={session.name === (attachedSession || activeSession?.name) ? "active" : ""}
-                >
-                  {session.name} {session.attached ? "*" : ""}
-                </button>
-              </li>
-            ))}
-          </ul>
-          <button onClick={createSession}>+ New Session</button>
-
-          <h3>Windows ({activeSession?.name ?? "-"})</h3>
-          <ul>
-            {activeSession
-              ? activeSession.windowStates.map((windowState) => (
-                  <li key={`${activeSession.name}-${windowState.index}`}>
-                    <button
-                      onClick={() =>
-                        sendControl({
-                          type: "select_window",
-                          session: activeSession.name,
-                          windowIndex: windowState.index
-                        })
-                      }
-                      className={windowState.active ? "active" : ""}
-                    >
-                      {windowState.index}: {windowState.name} {windowState.active ? "*" : ""}
-                    </button>
-                  </li>
-                ))
-              : null}
-          </ul>
-          <button
-            onClick={() =>
-              activeSession && sendControl({ type: "new_window", session: activeSession.name })
-            }
-            disabled={!activeSession}
-          >
-            + New Window
-          </button>
-
-          <h3>Panes ({activeWindow ? `${activeWindow.index}` : "-"})</h3>
-          <ul>
-            {activeWindow
-              ? activeWindow.panes.map((pane) => (
-                  <li key={pane.id}>
-                    <button
-                      onClick={() => sendControl({ type: "select_pane", paneId: pane.id })}
-                      className={pane.active ? "active" : ""}
-                    >
-                      %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
-                    </button>
-                  </li>
-                ))
-              : null}
-          </ul>
-          <div className="drawer-grid">
+        <div
+          className="drawer-backdrop"
+          onClick={() => setDrawerOpen(false)}
+          data-testid="drawer-backdrop"
+        >
+          <aside className="drawer" onClick={(event) => event.stopPropagation()}>
             <button
-              onClick={() => activePane && sendControl({ type: "split_pane", paneId: activePane.id, orientation: "h" })}
+              className="drawer-close"
+              onClick={() => setDrawerOpen(false)}
+              data-testid="drawer-close"
+            >
+              Close
+            </button>
+
+            <h3>Sessions</h3>
+            <ul data-testid="sessions-list">
+              {snapshot.sessions.map((session) => (
+                <li key={session.name}>
+                  <button
+                    onClick={() => sendControl({ type: "select_session", session: session.name })}
+                    className={session.name === (attachedSession || activeSession?.name) ? "active" : ""}
+                  >
+                    {session.name} {session.attached ? "*" : ""}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              className="drawer-section-action"
+              onClick={createSession}
+              data-testid="new-session-button"
+            >
+              + New Session
+            </button>
+
+            <h3>Windows ({activeSession?.name ?? "-"})</h3>
+            <ul data-testid="windows-list">
+              {activeSession
+                ? activeSession.windowStates.map((windowState) => (
+                    <li key={`${activeSession.name}-${windowState.index}`}>
+                      <button
+                        onClick={() =>
+                          sendControl({
+                            type: "select_window",
+                            session: activeSession.name,
+                            windowIndex: windowState.index
+                          })
+                        }
+                        className={windowState.active ? "active" : ""}
+                      >
+                        {windowState.index}: {windowState.name} {windowState.active ? "*" : ""}
+                      </button>
+                    </li>
+                  ))
+                : null}
+            </ul>
+            <button
+              className="drawer-section-action"
+              onClick={() =>
+                activeSession && sendControl({ type: "new_window", session: activeSession.name })
+              }
+              disabled={!activeSession}
+              data-testid="new-window-button"
+            >
+              + New Window
+            </button>
+
+            <h3>Panes ({activeWindow ? `${activeWindow.index}` : "-"})</h3>
+            <ul>
+              {activeWindow
+                ? activeWindow.panes.map((pane) => (
+                    <li key={pane.id}>
+                      <button
+                        onClick={() => sendControl({ type: "select_pane", paneId: pane.id })}
+                        className={pane.active ? "active" : ""}
+                      >
+                        %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
+                      </button>
+                    </li>
+                  ))
+                : null}
+            </ul>
+            <div className="drawer-grid">
+              <button
+                onClick={() =>
+                  activePane &&
+                  sendControl({ type: "split_pane", paneId: activePane.id, orientation: "h" })
+                }
+                disabled={!activePane}
+              >
+                Split H
+              </button>
+              <button
+                onClick={() =>
+                  activePane &&
+                  sendControl({ type: "split_pane", paneId: activePane.id, orientation: "v" })
+                }
+                disabled={!activePane}
+              >
+                Split V
+              </button>
+            </div>
+
+            <button
+              className="drawer-section-action"
+              onClick={() => activePane && sendControl({ type: "kill_pane", paneId: activePane.id })}
               disabled={!activePane}
             >
-              Split H
+              Close Pane
             </button>
             <button
-              onClick={() => activePane && sendControl({ type: "split_pane", paneId: activePane.id, orientation: "v" })}
-              disabled={!activePane}
+              className="drawer-section-action"
+              onClick={() =>
+                activeSession &&
+                activeWindow &&
+                sendControl({
+                  type: "kill_window",
+                  session: activeSession.name,
+                  windowIndex: activeWindow.index
+                })
+              }
+              disabled={!activeSession || !activeWindow}
             >
-              Split V
+              Kill Window
             </button>
-          </div>
-
-          <button
-            onClick={() => activePane && sendControl({ type: "kill_pane", paneId: activePane.id })}
-            disabled={!activePane}
-          >
-            Close Pane
-          </button>
-          <button
-            onClick={() =>
-              activeSession &&
-              activeWindow &&
-              sendControl({ type: "kill_window", session: activeSession.name, windowIndex: activeWindow.index })
-            }
-            disabled={!activeSession || !activeWindow}
-          >
-            Kill Window
-          </button>
-        </aside>
+          </aside>
+        </div>
       )}
 
       {sessionChoices && (
-        <div className="overlay">
+        <div className="overlay" data-testid="session-picker-overlay">
           <div className="card">
             <h2>Select Session</h2>
             {sessionChoices.map((session) => (

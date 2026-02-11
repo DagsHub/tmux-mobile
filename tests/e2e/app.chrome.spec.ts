@@ -1,0 +1,148 @@
+import { expect, test } from "@playwright/test";
+import { startE2EServer, type StartedE2EServer } from "./harness/test-server.js";
+
+test.describe("tmux-mobile browser behavior", () => {
+  test.describe("auto attach + drawer + terminal", () => {
+    let server: StartedE2EServer;
+
+    test.beforeAll(async () => {
+      server = await startE2EServer({ sessions: ["main"], defaultSession: "main" });
+    });
+
+    test.afterAll(async () => {
+      await server.stop();
+    });
+
+    test("auto-attaches and renders terminal viewport", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+
+      await expect(page.locator(".status.ok")).toContainText("Connected");
+      await expect(page.locator(".top-title")).toContainText("Session: main");
+      await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
+
+      await expect.poll(() => server.ptyFactory.processes.length).toBeGreaterThan(0);
+      server.ptyFactory.latestProcess().emitData("hello from e2e\r\n");
+
+      await expect(page.getByTestId("terminal-host")).toBeVisible();
+      const hostBox = await page.getByTestId("terminal-host").boundingBox();
+      expect(hostBox?.height ?? 0).toBeGreaterThan(120);
+
+      const [screenWidth, screenHeight] = await page.evaluate(() => {
+        const screen = document.querySelector(".terminal-host .xterm-screen") as HTMLElement | null;
+        if (!screen) {
+          return [0, 0] as const;
+        }
+        const rect = screen.getBoundingClientRect();
+        return [rect.width, rect.height] as const;
+      });
+
+      expect(screenWidth).toBeGreaterThan(40);
+      expect(screenHeight).toBeGreaterThan(40);
+      await expect(page.locator(".status.error")).toHaveCount(0);
+    });
+
+    test("drawer closes via backdrop and close button and preserves section spacing", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.locator(".status.ok")).toContainText("Connected");
+
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+
+      const sessionGap = await page.evaluate(() => {
+        const list = document.querySelector('[data-testid="sessions-list"]');
+        const last = list?.querySelector("li:last-child button") as HTMLElement | null;
+        const action = document.querySelector(
+          '[data-testid="new-session-button"]'
+        ) as HTMLElement | null;
+        if (!last || !action) {
+          return -1;
+        }
+        return action.getBoundingClientRect().top - last.getBoundingClientRect().bottom;
+      });
+
+      const windowGap = await page.evaluate(() => {
+        const list = document.querySelector('[data-testid="windows-list"]');
+        const last = list?.querySelector("li:last-child button") as HTMLElement | null;
+        const action = document.querySelector(
+          '[data-testid="new-window-button"]'
+        ) as HTMLElement | null;
+        if (!last || !action) {
+          return -1;
+        }
+        return action.getBoundingClientRect().top - last.getBoundingClientRect().bottom;
+      });
+
+      expect(sessionGap).toBeGreaterThan(2);
+      expect(windowGap).toBeGreaterThan(2);
+
+      await page.evaluate(() => {
+        const backdrop = document.querySelector('[data-testid=\"drawer-backdrop\"]') as HTMLElement | null;
+        if (!backdrop) {
+          return;
+        }
+        const rect = backdrop.getBoundingClientRect();
+        const clickX = Math.max(rect.right - 8, rect.left + 8);
+        const clickY = Math.max(rect.top + 24, rect.top + 8);
+        const target = document.elementFromPoint(clickX, clickY) as HTMLElement | null;
+        target?.click();
+      });
+      await expect(page.locator(".drawer")).toHaveCount(0);
+
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+      await page.getByTestId("drawer-close").click();
+      await expect(page.locator(".drawer")).toHaveCount(0);
+    });
+  });
+
+  test.describe("session picker", () => {
+    let server: StartedE2EServer;
+
+    test.beforeAll(async () => {
+      server = await startE2EServer({ sessions: ["work", "dev"], defaultSession: "main" });
+    });
+
+    test.afterAll(async () => {
+      await server.stop();
+    });
+
+    test("selecting a session from modal attaches and closes modal", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+
+      await expect(page.getByTestId("session-picker-overlay")).toBeVisible();
+      await page.getByTestId("session-picker-overlay").getByRole("button", { name: "work" }).click();
+
+      await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
+      await expect(page.locator(".top-title")).toContainText("Session: work");
+
+      await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("work");
+    });
+  });
+
+  test.describe("session picker fallback when switch-client fails", () => {
+    let server: StartedE2EServer;
+
+    test.beforeAll(async () => {
+      server = await startE2EServer({
+        sessions: ["work", "dev"],
+        defaultSession: "main",
+        failSwitchClient: true
+      });
+    });
+
+    test.afterAll(async () => {
+      await server.stop();
+    });
+
+    test("clicking session still attaches", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+
+      await expect(page.getByTestId("session-picker-overlay")).toBeVisible();
+      await page.getByTestId("session-picker-overlay").getByRole("button", { name: "dev" }).click();
+
+      await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
+      await expect(page.locator(".top-title")).toContainText("Session: dev");
+      await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("dev");
+    });
+  });
+});

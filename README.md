@@ -35,12 +35,15 @@ Options:
   --no-tunnel            Don't start cloudflared tunnel
   --session <name>       Default tmux session name (default: main)
   --scrollback <lines>   Default scrollback capture lines (default: 1000)
+  --debug-log <path>     Write backend debug logs to a file
 ```
 
 Optional environment variables:
 
 - `TMUX_MOBILE_SOCKET_NAME`: Use a dedicated tmux socket name (`tmux -L`) for isolation
 - `TMUX_MOBILE_SOCKET_PATH`: Use an explicit tmux socket path (`tmux -S`)
+- `TMUX_MOBILE_DEBUG_LOG`: Alternative way to enable debug log file output
+- `TMUX_MOBILE_USE_NODE_PTY=1`: Opt back into `node-pty` on Unix (default uses `script(1)` fallback for reliability)
 
 ## Test Harness
 
@@ -56,6 +59,13 @@ Run tests:
 npm test
 ```
 
+Browser E2E tests (Playwright + Chromium):
+
+```bash
+npx playwright install --with-deps chromium
+npm run test:e2e
+```
+
 Real tmux smoke test (requires `tmux`):
 
 ```bash
@@ -66,6 +76,7 @@ npm run test:smoke
 
 - `CI` (`.github/workflows/ci.yml`)
   - Runs typecheck, tests, and build on push/PR
+  - Runs browser E2E tests via Playwright Chromium
   - Runs an additional real tmux smoke job on Ubuntu with `tmux` installed
 - `Publish` (`.github/workflows/publish.yml`)
   - Triggered manually or by GitHub Release publish

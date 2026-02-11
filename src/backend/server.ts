@@ -102,6 +102,8 @@ export const createTmuxMobileServer = (
 
   const runtime = new TerminalRuntime(deps.ptyFactory);
   let monitor: TmuxStateMonitor | undefined;
+  let started = false;
+  let stopPromise: Promise<void> | null = null;
 
   runtime.on("data", (chunk) => {
     for (const client of terminalClients) {
@@ -131,25 +133,33 @@ export const createTmuxMobileServer = (
     forceSession?: string
   ): Promise<void> => {
     if (forceSession) {
+      logger.log("attach session (forced)", forceSession);
       runtime.attachToSession(forceSession);
       sendJson(socket, { type: "attached", session: forceSession });
       return;
     }
 
     const sessions = await deps.tmux.listSessions();
+    logger.log(
+      "sessions discovered",
+      sessions.map((session) => `${session.name}:${session.attached ? "attached" : "detached"}`).join(",")
+    );
     if (sessions.length === 0) {
       await deps.tmux.createSession(config.defaultSession);
+      logger.log("created default session", config.defaultSession);
       runtime.attachToSession(config.defaultSession);
       sendJson(socket, { type: "attached", session: config.defaultSession });
       return;
     }
 
     if (sessions.length === 1) {
+      logger.log("attach only session", sessions[0].name);
       runtime.attachToSession(sessions[0].name);
       sendJson(socket, { type: "attached", session: sessions[0].name });
       return;
     }
 
+    logger.log("show session picker", sessions.length);
     sendJson(socket, { type: "session_picker", sessions });
   };
 
@@ -159,13 +169,11 @@ export const createTmuxMobileServer = (
   ): Promise<void> => {
     switch (message.type) {
       case "select_session":
-        await deps.tmux.switchClient(message.session);
         runtime.attachToSession(message.session);
         sendJson(socket, { type: "attached", session: message.session });
         return;
       case "new_session":
         await deps.tmux.createSession(message.name);
-        await deps.tmux.switchClient(message.name);
         runtime.attachToSession(message.name);
         sendJson(socket, { type: "attached", session: message.name });
         return;
@@ -217,6 +225,7 @@ export const createTmuxMobileServer = (
       clientId: randomToken(12)
     };
     controlClients.add(context);
+    logger.log("control ws connected", context.clientId);
 
     const url = new URL(request.url ?? "/", "http://localhost");
     const tokenFromQuery = url.searchParams.get("token") ?? undefined;
@@ -228,6 +237,7 @@ export const createTmuxMobileServer = (
         sendJson(socket, { type: "error", message: "invalid message format" });
         return;
       }
+      logger.log("control ws message", context.clientId, message.type);
 
       try {
         if (!context.authed) {
@@ -241,6 +251,7 @@ export const createTmuxMobileServer = (
             password: message.password ?? passwordFromQuery
           });
           if (!authResult.ok) {
+            logger.log("control ws auth failed", context.clientId, authResult.reason ?? "unknown");
             sendJson(socket, {
               type: "auth_error",
               reason: authResult.reason ?? "unauthorized"
@@ -249,19 +260,32 @@ export const createTmuxMobileServer = (
           }
 
           context.authed = true;
+          logger.log("control ws auth ok", context.clientId);
           sendJson(socket, {
             type: "auth_ok",
             clientId: context.clientId,
             requiresPassword: authService.requiresPassword()
           });
-          await ensureAttachedSession(socket);
+          try {
+            await ensureAttachedSession(socket);
+          } catch (error) {
+            logger.error("initial attach failed", error);
+            sendJson(socket, {
+              type: "error",
+              message: error instanceof Error ? error.message : String(error)
+            });
+          }
           await monitor?.forcePublish();
           return;
         }
 
-        await runControlMutation(message, socket);
-        await monitor?.forcePublish();
+        try {
+          await runControlMutation(message, socket);
+        } finally {
+          await monitor?.forcePublish();
+        }
       } catch (error) {
+        logger.error("control ws error", context.clientId, error);
         sendJson(socket, {
           type: "error",
           message: error instanceof Error ? error.message : String(error)
@@ -271,24 +295,28 @@ export const createTmuxMobileServer = (
 
     socket.on("close", () => {
       controlClients.delete(context);
+      logger.log("control ws closed", context.clientId);
     });
   });
 
   terminalWss.on("connection", (socket, request) => {
     const ctx: DataContext = { socket, authed: false };
     terminalClients.add(ctx);
+    logger.log("terminal ws connected");
 
     const url = new URL(request.url ?? "/", "http://localhost");
     const token = url.searchParams.get("token") ?? undefined;
     const password = url.searchParams.get("password") ?? undefined;
     const authResult = authService.verify({ token, password });
     if (!authResult.ok) {
+      logger.log("terminal ws auth failed", authResult.reason ?? "unknown");
       socket.close(4001, "unauthorized");
       terminalClients.delete(ctx);
       return;
     }
 
     ctx.authed = true;
+    logger.log("terminal ws auth ok");
 
     socket.on("message", (rawData, isBinary) => {
       if (!ctx.authed) {
@@ -323,6 +351,7 @@ export const createTmuxMobileServer = (
 
     socket.on("close", () => {
       terminalClients.delete(ctx);
+      logger.log("terminal ws closed");
     });
   });
 
@@ -350,6 +379,10 @@ export const createTmuxMobileServer = (
     config,
     server,
     async start() {
+      if (started) {
+        return;
+      }
+      logger.log("server start requested", `${config.host}:${config.port}`);
       monitor = new TmuxStateMonitor(
         deps.tmux,
         config.pollIntervalMs,
@@ -366,11 +399,23 @@ export const createTmuxMobileServer = (
         server.once("error", onError);
         server.listen(config.port, config.host, () => {
           server.off("error", onError);
+          started = true;
+          logger.log("server listening", `${config.host}:${(server.address() as { port: number }).port}`);
           resolve();
         });
       });
     },
     async stop() {
+      if (!started) {
+        return;
+      }
+      if (stopPromise) {
+        await stopPromise;
+        return;
+      }
+
+      stopPromise = (async () => {
+      logger.log("server shutdown begin");
       monitor?.stop();
       runtime.shutdown();
       controlWss.close();
@@ -384,6 +429,15 @@ export const createTmuxMobileServer = (
           resolve();
         });
       });
+      logger.log("server shutdown complete");
+      })();
+
+      try {
+        await stopPromise;
+      } finally {
+        started = false;
+        stopPromise = null;
+      }
     }
   };
 };

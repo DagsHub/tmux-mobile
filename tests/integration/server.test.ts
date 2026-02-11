@@ -27,10 +27,16 @@ describe("tmux mobile server", () => {
   let ptyFactory: FakePtyFactory;
   let baseWsUrl: string;
 
-  const startWithSessions = async (sessions: string[], password?: string): Promise<void> => {
-    tmux = new FakeTmuxGateway(sessions);
+  const startWithSessions = async (
+    sessions: string[],
+    options: { password?: string; attachedSession?: string; failSwitchClient?: boolean } = {}
+  ): Promise<void> => {
+    tmux = new FakeTmuxGateway(sessions, {
+      attachedSession: options.attachedSession,
+      failSwitchClient: options.failSwitchClient
+    });
     ptyFactory = new FakePtyFactory();
-    const auth = new AuthService(password, "test-token");
+    const auth = new AuthService(options.password, "test-token");
 
     runningServer = createTmuxMobileServer(buildConfig("test-token"), {
       tmux,
@@ -83,7 +89,7 @@ describe("tmux mobile server", () => {
 
   test("shows session picker when multiple sessions exist", async () => {
     await runningServer.stop();
-    await startWithSessions(["main", "work"]);
+    await startWithSessions(["work", "dev"]);
 
     const control = await openSocket(`${baseWsUrl}/ws/control`);
     control.send(JSON.stringify({ type: "auth", token: "test-token" }));
@@ -94,6 +100,43 @@ describe("tmux mobile server", () => {
     );
 
     expect(picker.sessions).toHaveLength(2);
+    control.close();
+  });
+
+  test("shows session picker even when one session is currently attached", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main", "work"], { attachedSession: "work" });
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+
+    const picker = await waitForMessage<{ type: string; sessions: Array<{ name: string }> }>(
+      control,
+      (msg) => msg.type === "session_picker"
+    );
+
+    expect(picker.sessions).toHaveLength(2);
+    expect(ptyFactory.lastSpawnedSession).toBeUndefined();
+    control.close();
+  });
+
+  test("select_session attaches without using switch-client", async () => {
+    await runningServer.stop();
+    await startWithSessions(["work", "dev"], { failSwitchClient: true });
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    await waitForMessage(control, (msg: { type: string }) => msg.type === "session_picker");
+
+    control.send(JSON.stringify({ type: "select_session", session: "dev" }));
+    const attached = await waitForMessage<{ type: string; session: string }>(
+      control,
+      (msg) => msg.type === "attached"
+    );
+
+    expect(attached.session).toBe("dev");
+    expect(ptyFactory.lastSpawnedSession).toBe("dev");
+    expect(tmux.calls.some((call) => call.startsWith("switchClient:"))).toBe(false);
     control.close();
   });
 
@@ -135,5 +178,10 @@ describe("tmux mobile server", () => {
 
     terminal.close();
     control.close();
+  });
+
+  test("stop is idempotent when called repeatedly", async () => {
+    await runningServer.stop();
+    await runningServer.stop();
   });
 });

@@ -16,4 +16,5 @@ export interface CliArgs {
   tunnel: boolean;
   session: string;
   scrollback: number;
+  debugLog?: string;
 }
