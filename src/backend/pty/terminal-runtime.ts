@@ -11,6 +11,7 @@ export class TerminalRuntime {
   private readonly events = new EventEmitter();
   private process?: PtyProcess;
   private session?: string;
+  private lastDimensions: { cols: number; rows: number } = { cols: 80, rows: 24 };
 
   public constructor(private readonly factory: PtyFactory) {}
 
@@ -37,6 +38,7 @@ export class TerminalRuntime {
         this.process = undefined;
       }
     });
+    processRef.resize(this.lastDimensions.cols, this.lastDimensions.rows);
     this.process = processRef;
     this.events.emit("attach", session);
   }
@@ -46,7 +48,11 @@ export class TerminalRuntime {
   }
 
   public resize(cols: number, rows: number): void {
-    this.process?.resize(cols, rows);
+    if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 2 || rows < 2) {
+      return;
+    }
+    this.lastDimensions = { cols: Math.floor(cols), rows: Math.floor(rows) };
+    this.process?.resize(this.lastDimensions.cols, this.lastDimensions.rows);
   }
 
   public on<K extends keyof TerminalRuntimeEvents>(

@@ -134,6 +134,21 @@ export const App = () => {
     socket.send(output);
   };
 
+  const sendTerminalResize = (): void => {
+    const socket = terminalSocketRef.current;
+    const terminal = terminalRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) {
+      return;
+    }
+    socket.send(
+      JSON.stringify({
+        type: "resize",
+        cols: terminal.cols,
+        rows: terminal.rows
+      })
+    );
+  };
+
   const toggleModifier = (key: ModifierKey): void => {
     const now = Date.now();
     const isDoubleTap =
@@ -184,14 +199,8 @@ export const App = () => {
       setStatusMessage("terminal connected");
       if (fitAddonRef.current && terminalRef.current) {
         fitAddonRef.current.fit();
-        socket.send(
-          JSON.stringify({
-            type: "resize",
-            cols: terminalRef.current.cols,
-            rows: terminalRef.current.rows
-          })
-        );
       }
+      sendTerminalResize();
     };
 
     socket.onmessage = (event) => {
@@ -247,6 +256,10 @@ export const App = () => {
           setSessionChoices(null);
           setDrawerOpen(false);
           setStatusMessage(`attached: ${message.session}`);
+          if (fitAddonRef.current) {
+            fitAddonRef.current.fit();
+          }
+          sendTerminalResize();
           return;
         case "session_picker":
           setSessionChoices(message.sessions);
@@ -332,21 +345,19 @@ export const App = () => {
 
     const onResize = () => {
       fitAddon.fit();
-      if (terminalSocketRef.current?.readyState === WebSocket.OPEN) {
-        terminalSocketRef.current.send(
-          JSON.stringify({
-            type: "resize",
-            cols: terminal.cols,
-            rows: terminal.rows
-          })
-        );
-      }
+      sendTerminalResize();
     };
 
     window.addEventListener("resize", onResize);
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+      sendTerminalResize();
+    });
+    resizeObserver.observe(terminalContainerRef.current);
 
     return () => {
       window.removeEventListener("resize", onResize);
+      resizeObserver.disconnect();
       disposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
@@ -402,7 +413,12 @@ export const App = () => {
       </header>
 
       <main className="terminal-wrap">
-        <div className="terminal-host" ref={terminalContainerRef} data-testid="terminal-host" />
+        <div
+          className="terminal-host"
+          ref={terminalContainerRef}
+          data-testid="terminal-host"
+          onContextMenu={(event) => event.preventDefault()}
+        />
       </main>
 
       <section className="toolbar">
