@@ -62,7 +62,37 @@ input {
 
 .top-actions {
   display: flex;
+  align-items: center;
   gap: 0.35rem;
+}
+
+.top-status {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: #64748b;
+  display: inline-block;
+}
+
+.top-status.ok {
+  background: #16a34a;
+  border-color: #86efac;
+}
+
+.top-status.warn {
+  background: #d97706;
+  border-color: #fcd34d;
+}
+
+.top-status.error {
+  background: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.top-status.pending {
+  background: #64748b;
+  border-color: #cbd5e1;
 }
 
 .terminal-wrap {
@@ -141,6 +171,12 @@ button.danger {
   padding: 0.45rem;
 }
 
+.password-error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 0.92rem;
+}
+
 .drawer {
   position: absolute;
   left: 0;
@@ -183,6 +219,12 @@ button.danger {
 
 .drawer-close {
   margin-bottom: 0.4rem;
+  width: 2.2rem;
+  text-align: center;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.35rem;
 }
 
 .drawer-section-action {
@@ -241,32 +283,6 @@ button.danger {
   border: 1px solid #1e293b;
   border-radius: 8px;
   padding: 0.65rem;
-}
-
-.status {
-  position: absolute;
-  right: 0.5rem;
-  bottom: 0.5rem;
-  padding: 0.35rem 0.55rem;
-  border-radius: 8px;
-  font-size: 0.8rem;
-  background: rgba(2, 6, 23, 0.9);
-  border: 1px solid #334155;
-}
-
-.status.error {
-  color: #fecaca;
-  border-color: #b91c1c;
-}
-
-.status.ok {
-  color: #86efac;
-  border-color: #16a34a;
-}
-
-.status.info {
-  color: #bfdbfe;
-  border-color: #2563eb;
 }
 
 @media (orientation: landscape) {

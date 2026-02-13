@@ -164,7 +164,9 @@ describe("tmux mobile server", () => {
     expect(tmux.calls).toContain(`splitWindow:${paneId}:h`);
     expect(ptyFactory.latestProcess().writes).toContain("echo hi\r");
 
-    const terminal = await openSocket(`${baseWsUrl}/ws/terminal?token=test-token`);
+    const terminal = await openSocket(`${baseWsUrl}/ws/terminal`);
+    terminal.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     const terminalDataPromise = new Promise<string>((resolve) => {
       terminal.once("message", (raw: RawData) => resolve(raw.toString("utf8")));
     });

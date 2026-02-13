@@ -11,6 +11,7 @@ export interface E2EServerOptions {
   attachedSession?: string;
   failSwitchClient?: boolean;
   defaultSession?: string;
+  password?: string;
 }
 
 export interface StartedE2EServer {
@@ -25,7 +26,7 @@ export const startE2EServer = async (
   options: E2EServerOptions
 ): Promise<StartedE2EServer> => {
   const token = "e2e-token";
-  const authService = new AuthService(undefined, token);
+  const authService = new AuthService(options.password, token);
   const tmux = new FakeTmuxGateway(options.sessions, {
     attachedSession: options.attachedSession,
     failSwitchClient: options.failSwitchClient
@@ -35,7 +36,7 @@ export const startE2EServer = async (
   const config: RuntimeConfig = {
     port: 0,
     host: "127.0.0.1",
-    password: undefined,
+    password: options.password,
     tunnel: false,
     defaultSession: options.defaultSession ?? "main",
     scrollbackLines: 1000,

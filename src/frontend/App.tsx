@@ -27,6 +27,10 @@ const wsOrigin = (() => {
   return `${scheme}://${window.location.host}`;
 })();
 
+const getPreferredTerminalFontSize = (): number => {
+  return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches ? 12 : 14;
+};
+
 const parseMessage = (raw: string): ControlServerMessage | null => {
   try {
     return JSON.parse(raw) as ControlServerMessage;
@@ -47,6 +51,7 @@ export const App = () => {
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [password, setPassword] = useState(localStorage.getItem("tmux-mobile-password") ?? "");
   const [needsPasswordInput, setNeedsPasswordInput] = useState(false);
+  const [passwordErrorMessage, setPasswordErrorMessage] = useState("");
   const [authReady, setAuthReady] = useState(false);
 
   const [snapshot, setSnapshot] = useState<TmuxStateSnapshot>({ sessions: [], capturedAt: "" });
@@ -88,6 +93,25 @@ export const App = () => {
     }
     return activeWindow.panes.find((pane) => pane.active) ?? activeWindow.panes[0];
   }, [activeWindow]);
+
+  const topStatus = useMemo(() => {
+    if (errorMessage) {
+      return { kind: "error", label: errorMessage };
+    }
+    if (statusMessage.toLowerCase().includes("disconnected")) {
+      return { kind: "warn", label: statusMessage };
+    }
+    if (statusMessage.toLowerCase().includes("connected")) {
+      return { kind: "ok", label: statusMessage };
+    }
+    if (statusMessage) {
+      return { kind: "pending", label: statusMessage };
+    }
+    if (authReady) {
+      return { kind: "ok", label: "connected" };
+    }
+    return { kind: "pending", label: "connecting" };
+  }, [authReady, errorMessage, statusMessage]);
 
   const sendControl = (payload: Record<string, unknown>): void => {
     if (controlSocketRef.current?.readyState !== WebSocket.OPEN) {
@@ -185,17 +209,19 @@ export const App = () => {
     sendControl({ type: "capture_scrollback", paneId: activePane.id, lines });
   };
 
+  const formatPasswordError = (reason: string): string => {
+    if (reason === "invalid password") {
+      return "Wrong password. Try again.";
+    }
+    return reason;
+  };
+
   const openTerminalSocket = (passwordValue: string): void => {
     terminalSocketRef.current?.close();
 
-    const url = new URL(`${wsOrigin}/ws/terminal`);
-    url.searchParams.set("token", token);
-    if (passwordValue) {
-      url.searchParams.set("password", passwordValue);
-    }
-
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(`${wsOrigin}/ws/terminal`);
     socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
       setStatusMessage("terminal connected");
       if (fitAddonRef.current && terminalRef.current) {
         fitAddonRef.current.fit();
@@ -207,7 +233,10 @@ export const App = () => {
       terminalRef.current?.write(typeof event.data === "string" ? event.data : "");
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+      if (event.code === 4001) {
+        setErrorMessage("terminal authentication failed");
+      }
       setStatusMessage("terminal disconnected");
     };
     socket.onerror = () => {
@@ -220,13 +249,7 @@ export const App = () => {
   const openControlSocket = (passwordValue: string): void => {
     controlSocketRef.current?.close();
 
-    const url = new URL(`${wsOrigin}/ws/control`);
-    url.searchParams.set("token", token);
-    if (passwordValue) {
-      url.searchParams.set("password", passwordValue);
-    }
-
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(`${wsOrigin}/ws/control`);
 
     socket.onopen = () => {
       socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
@@ -240,15 +263,26 @@ export const App = () => {
 
       switch (message.type) {
         case "auth_ok":
+          setErrorMessage("");
+          setPasswordErrorMessage("");
           setAuthReady(true);
           setNeedsPasswordInput(false);
+          if (message.requiresPassword && passwordValue) {
+            localStorage.setItem("tmux-mobile-password", passwordValue);
+          } else {
+            localStorage.removeItem("tmux-mobile-password");
+          }
           openTerminalSocket(passwordValue);
           return;
         case "auth_error":
           setErrorMessage(message.reason);
           setAuthReady(false);
-          if (serverConfig?.passwordRequired) {
+          const passwordAuthFailed =
+            message.reason === "invalid password" || Boolean(serverConfig?.passwordRequired);
+          if (passwordAuthFailed) {
             setNeedsPasswordInput(true);
+            setPasswordErrorMessage(formatPasswordError(message.reason));
+            localStorage.removeItem("tmux-mobile-password");
           }
           return;
         case "attached":
@@ -303,6 +337,7 @@ export const App = () => {
 
         if (config.passwordRequired && !password) {
           setNeedsPasswordInput(true);
+          setPasswordErrorMessage("");
           return;
         }
 
@@ -318,10 +353,11 @@ export const App = () => {
       return;
     }
 
+    const initialFontSize = getPreferredTerminalFontSize();
     const terminal = new Terminal({
       cursorBlink: true,
       fontFamily: "Menlo, Monaco, 'Courier New', monospace",
-      fontSize: 14,
+      fontSize: initialFontSize,
       theme: {
         background: "#0d1117",
         foreground: "#d1e4ff",
@@ -343,15 +379,22 @@ export const App = () => {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    const onResize = () => {
+    const fitAndNotifyResize = () => {
+      const preferredFontSize = getPreferredTerminalFontSize();
+      if (terminal.options.fontSize !== preferredFontSize) {
+        terminal.options.fontSize = preferredFontSize;
+      }
       fitAddon.fit();
       sendTerminalResize();
     };
 
+    const onResize = () => {
+      fitAndNotifyResize();
+    };
+
     window.addEventListener("resize", onResize);
     const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      sendTerminalResize();
+      fitAndNotifyResize();
     });
     resizeObserver.observe(terminalContainerRef.current);
 
@@ -373,7 +416,7 @@ export const App = () => {
   }, []);
 
   const submitPassword = (): void => {
-    localStorage.setItem("tmux-mobile-password", password);
+    setPasswordErrorMessage("");
     openControlSocket(password);
   };
 
@@ -401,8 +444,16 @@ export const App = () => {
         >
           =
         </button>
-        <div className="top-title">Session: {attachedSession || activeSession?.name || "-"}</div>
+        <div className="top-title">
+          Window: {activeWindow ? `${activeWindow.index}: ${activeWindow.name}` : "-"}
+        </div>
         <div className="top-actions">
+          <span
+            className={`top-status ${topStatus.kind}`}
+            title={topStatus.label}
+            aria-label={`Status: ${topStatus.label}`}
+            data-testid="top-status-indicator"
+          />
           <button className="top-btn" onClick={() => requestScrollback(serverConfig?.scrollbackLines ?? 1000)}>
             Scroll
           </button>
@@ -432,7 +483,7 @@ export const App = () => {
           <button onClick={() => sendTerminal("\u001b[3~")}>Del</button>
           <button onClick={() => sendTerminal("\u007f")}>BS</button>
           <button onClick={() => sendTerminal("\u001b[H")}>Hm</button>
-          <button onClick={() => sendTerminal("\u001b[A")}>Up</button>
+          <button onClick={() => sendTerminal("\u001b[A")}>↑</button>
           <button onClick={() => sendTerminal("\u001b[F")}>Ed</button>
           <button onClick={() => sendTerminal("\r")}>Enter</button>
         </div>
@@ -443,7 +494,7 @@ export const App = () => {
           <button onClick={() => sendTerminal("\u0004", false)}>^D</button>
           <button className="danger" onClick={() => sendTerminal("\u0003", false)}>^C</button>
           <button onClick={() => sendTerminal("\u000c", false)}>^L</button>
-          <button onClick={() => sendTerminal("\u0012", false)}>^R</button>
+          <button onClick={() => sendTerminal("\u0002", false)}>^B</button>
           <button
             onClick={async () => {
               const clip = await navigator.clipboard.readText();
@@ -452,9 +503,9 @@ export const App = () => {
           >
             Paste
           </button>
-          <button onClick={() => sendTerminal("\u001b[D")}>Left</button>
-          <button onClick={() => sendTerminal("\u001b[B")}>Down</button>
-          <button onClick={() => sendTerminal("\u001b[C")}>Right</button>
+          <button onClick={() => sendTerminal("\u001b[D")}>←</button>
+          <button onClick={() => sendTerminal("\u001b[B")}>↓</button>
+          <button onClick={() => sendTerminal("\u001b[C")}>→</button>
         </div>
       </section>
 
@@ -493,8 +544,9 @@ export const App = () => {
               className="drawer-close"
               onClick={() => setDrawerOpen(false)}
               data-testid="drawer-close"
+              aria-label="Close drawer"
             >
-              Close
+              ←
             </button>
 
             <h3>Sessions</h3>
@@ -648,9 +700,19 @@ export const App = () => {
             <input
               type="password"
               value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                if (passwordErrorMessage) {
+                  setPasswordErrorMessage("");
+                }
+              }}
               placeholder="Enter password"
             />
+            {passwordErrorMessage && (
+              <p className="password-error" data-testid="password-error">
+                {passwordErrorMessage}
+              </p>
+            )}
             <button onClick={submitPassword}>Connect</button>
           </div>
         </div>
@@ -661,10 +723,6 @@ export const App = () => {
           <div className="card">URL missing `token` query parameter.</div>
         </div>
       )}
-
-      {errorMessage && <div className="status error">{errorMessage}</div>}
-      {statusMessage && <div className="status info">{statusMessage}</div>}
-      {authReady && <div className="status ok">Connected</div>}
     </div>
   );
 };

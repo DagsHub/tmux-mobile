@@ -12,6 +12,7 @@ import { NodePtyFactory } from "./pty/node-pty-adapter.js";
 import { createTmuxMobileServer } from "./server.js";
 import { TmuxCliExecutor } from "./tmux/cli-executor.js";
 import { createLogger } from "./util/file-logger.js";
+import { randomToken } from "./util/random.js";
 
 const parseCliArgs = async (): Promise<CliArgs> => {
   const argv = await yargs(hideBin(process.argv))
@@ -24,6 +25,11 @@ const parseCliArgs = async (): Promise<CliArgs> => {
     })
     .option("password", {
       type: "string",
+      describe: "Password for authentication (auto-generated when protection is enabled)"
+    })
+    .option("require-password", {
+      type: "boolean",
+      default: true,
       describe: "Require password authentication"
     })
     .option("tunnel", {
@@ -52,6 +58,7 @@ const parseCliArgs = async (): Promise<CliArgs> => {
   return {
     port: argv.port,
     password: argv.password,
+    requirePassword: argv.requirePassword,
     tunnel: argv.tunnel,
     session: argv.session,
     scrollback: argv.scrollback,
@@ -59,16 +66,26 @@ const parseCliArgs = async (): Promise<CliArgs> => {
   };
 };
 
+const buildLaunchUrl = (baseUrl: string, token: string): string => {
+  const url = new URL(baseUrl);
+  url.searchParams.set("token", token);
+  return url.toString();
+};
+
 const printConnectionInfo = (
   localUrl: string,
   tunnelUrl: string | undefined,
-  token: string
+  token: string,
+  password?: string
 ): void => {
-  const localWithToken = `${localUrl}/?token=${encodeURIComponent(token)}`;
+  const localWithToken = buildLaunchUrl(localUrl, token);
   console.log(`Local URL: ${localWithToken}`);
+  if (password) {
+    console.log(`Password: ${password}`);
+  }
 
   if (tunnelUrl) {
-    const tunnelWithToken = `${tunnelUrl}/?token=${encodeURIComponent(token)}`;
+    const tunnelWithToken = buildLaunchUrl(tunnelUrl, token);
     console.log(`Tunnel URL: ${tunnelWithToken}`);
     qrcode.generate(tunnelWithToken, { small: true });
     return;
@@ -79,7 +96,8 @@ const printConnectionInfo = (
 
 const main = async (): Promise<void> => {
   const args = await parseCliArgs();
-  const authService = new AuthService(args.password);
+  const effectivePassword = args.requirePassword ? args.password ?? randomToken(16) : undefined;
+  const authService = new AuthService(effectivePassword);
   const debugLogPath = args.debugLog ?? process.env.TMUX_MOBILE_DEBUG_LOG;
   const logger = createLogger(debugLogPath);
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
@@ -88,7 +106,7 @@ const main = async (): Promise<void> => {
   const config: RuntimeConfig = {
     port: args.port,
     host: "127.0.0.1",
-    password: args.password,
+    password: effectivePassword,
     tunnel: args.tunnel,
     defaultSession: args.session,
     scrollbackLines: args.scrollback,
@@ -127,7 +145,7 @@ const main = async (): Promise<void> => {
     }
   }
 
-  printConnectionInfo(`http://localhost:${args.port}`, tunnelUrl, authService.token);
+  printConnectionInfo(`http://localhost:${args.port}`, tunnelUrl, authService.token, effectivePassword);
 
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = async (): Promise<void> => {

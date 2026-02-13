@@ -16,8 +16,8 @@ test.describe("tmux-mobile browser behavior", () => {
     test("auto-attaches and renders terminal viewport", async ({ page }) => {
       await page.goto(`${server.baseUrl}/?token=${server.token}`);
 
-      await expect(page.locator(".status.ok")).toContainText("Connected");
-      await expect(page.locator(".top-title")).toContainText("Session: main");
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+      await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
 
       await expect.poll(() => server.ptyFactory.processes.length).toBeGreaterThan(0);
@@ -38,12 +38,12 @@ test.describe("tmux-mobile browser behavior", () => {
 
       expect(screenWidth).toBeGreaterThan(40);
       expect(screenHeight).toBeGreaterThan(40);
-      await expect(page.locator(".status.error")).toHaveCount(0);
+      await expect(page.getByTestId("top-status-indicator")).not.toHaveClass(/error/);
     });
 
     test("drawer closes via backdrop and close button and preserves section spacing", async ({ page }) => {
       await page.goto(`${server.baseUrl}/?token=${server.token}`);
-      await expect(page.locator(".status.ok")).toContainText("Connected");
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
 
       await page.getByTestId("drawer-toggle").click();
       await expect(page.locator(".drawer")).toBeVisible();
@@ -113,9 +113,61 @@ test.describe("tmux-mobile browser behavior", () => {
       await page.getByTestId("session-picker-overlay").getByRole("button", { name: "work" }).click();
 
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
-      await expect(page.locator(".top-title")).toContainText("Session: work");
+      await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
 
       await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("work");
+    });
+  });
+
+  test.describe("password auth", () => {
+    let server: StartedE2EServer;
+
+    test.beforeAll(async () => {
+      server = await startE2EServer({
+        sessions: ["main"],
+        defaultSession: "main",
+        password: "correct-horse"
+      });
+    });
+
+    test.afterAll(async () => {
+      await server.stop();
+    });
+
+    test("shows feedback for wrong password and allows retry", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+
+      await expect(page.getByRole("heading", { name: "Password Required" })).toBeVisible();
+
+      await page.getByPlaceholder("Enter password").fill("wrong-password");
+      await page.getByRole("button", { name: "Connect" }).click();
+
+      await expect(page.getByTestId("password-error")).toContainText("Wrong password. Try again.");
+      await expect(page.getByRole("heading", { name: "Password Required" })).toBeVisible();
+
+      await page.getByPlaceholder("Enter password").fill("correct-horse");
+      await page.getByRole("button", { name: "Connect" }).click();
+
+      await expect(page.getByRole("heading", { name: "Password Required" })).toHaveCount(0);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+      await expect(page.getByTestId("top-status-indicator")).not.toHaveClass(/error/);
+    });
+
+    test("shows feedback when saved password is wrong", async ({ page }) => {
+      await page.addInitScript(() => {
+        localStorage.setItem("tmux-mobile-password", "wrong-password");
+      });
+
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+
+      await expect(page.getByRole("heading", { name: "Password Required" })).toBeVisible();
+      await expect(page.getByTestId("password-error")).toContainText("Wrong password. Try again.");
+
+      await page.getByPlaceholder("Enter password").fill("correct-horse");
+      await page.getByRole("button", { name: "Connect" }).click();
+
+      await expect(page.getByRole("heading", { name: "Password Required" })).toHaveCount(0);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
     });
   });
 
@@ -141,7 +193,7 @@ test.describe("tmux-mobile browser behavior", () => {
       await page.getByTestId("session-picker-overlay").getByRole("button", { name: "dev" }).click();
 
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
-      await expect(page.locator(".top-title")).toContainText("Session: dev");
+      await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
       await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("dev");
     });
   });

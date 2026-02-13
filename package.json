@@ -1,11 +1,31 @@
 {
   "name": "tmux-mobile",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Mobile-first tmux web interface over cloudflared",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DagsHub/tmux-mobile.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DagsHub/tmux-mobile/issues"
+  },
+  "homepage": "https://github.com/DagsHub/tmux-mobile#readme",
+  "keywords": [
+    "tmux",
+    "terminal",
+    "mobile",
+    "websocket",
+    "cloudflared"
+  ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "bin": {
     "tmux-mobile": "dist/backend/cli.js"

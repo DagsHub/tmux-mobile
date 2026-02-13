@@ -227,10 +227,6 @@ export const createTmuxMobileServer = (
     controlClients.add(context);
     logger.log("control ws connected", context.clientId);
 
-    const url = new URL(request.url ?? "/", "http://localhost");
-    const tokenFromQuery = url.searchParams.get("token") ?? undefined;
-    const passwordFromQuery = url.searchParams.get("password") ?? undefined;
-
     socket.on("message", async (rawData) => {
       const message = parseClientMessage(rawData.toString("utf8"));
       if (!message) {
@@ -247,8 +243,8 @@ export const createTmuxMobileServer = (
           }
 
           const authResult = authService.verify({
-            token: message.token ?? tokenFromQuery,
-            password: message.password ?? passwordFromQuery
+            token: message.token,
+            password: message.password
           });
           if (!authResult.ok) {
             logger.log("control ws auth failed", context.clientId, authResult.reason ?? "unknown");
@@ -304,22 +300,31 @@ export const createTmuxMobileServer = (
     terminalClients.add(ctx);
     logger.log("terminal ws connected");
 
-    const url = new URL(request.url ?? "/", "http://localhost");
-    const token = url.searchParams.get("token") ?? undefined;
-    const password = url.searchParams.get("password") ?? undefined;
-    const authResult = authService.verify({ token, password });
-    if (!authResult.ok) {
-      logger.log("terminal ws auth failed", authResult.reason ?? "unknown");
-      socket.close(4001, "unauthorized");
-      terminalClients.delete(ctx);
-      return;
-    }
-
-    ctx.authed = true;
-    logger.log("terminal ws auth ok");
-
     socket.on("message", (rawData, isBinary) => {
       if (!ctx.authed) {
+        if (isBinary) {
+          socket.close(4001, "auth required");
+          return;
+        }
+
+        const authMessage = parseClientMessage(rawData.toString("utf8"));
+        if (!authMessage || authMessage.type !== "auth") {
+          socket.close(4001, "auth required");
+          return;
+        }
+
+        const authResult = authService.verify({
+          token: authMessage.token,
+          password: authMessage.password
+        });
+        if (!authResult.ok) {
+          logger.log("terminal ws auth failed", authResult.reason ?? "unknown");
+          socket.close(4001, "unauthorized");
+          return;
+        }
+
+        ctx.authed = true;
+        logger.log("terminal ws auth ok");
         return;
       }
 
