@@ -2,9 +2,15 @@
 
 ![tmux-mobile banner](./banner.jpg)
 
-Mobile-first tmux web client with a Node.js backend and React + xterm frontend.
+**Control your AI agents from anywhere.** Mobile-first tmux web client that lets you wrangle Claude Code, agentic workflows, and persistent terminal sessions from your phone.
 
-Use it to control your tmux server from a phone browser, locally or over a Cloudflare quick tunnel.
+Inspiration strikes unexpectedly—often when you're away from your desk. With tmux-mobile, your development environment travels with you. Access it locally or over a secure Cloudflare tunnel.
+
+**Why tmux + mobile matters now:**
+- **Claude Code Teams** and emerging agentic workflows run in tmux sessions
+- **Persistent sessions** survive disconnects—your AI agents keep working even when you close the browser
+- **Zero tmux knowledge required**—if you can tap a screen, you can use it
+- **Born from necessity**—this project literally came to life on the toilet, because sometimes the best ideas (and urgent debugging) can't wait
 
 ## Screenshot
 
@@ -17,6 +23,7 @@ Use it to control your tmux server from a phone browser, locally or over a Cloud
 
 ## Prerequisites
 
+- `Node.js` 20 or newer is required.
 - `tmux` must be installed on the machine running `tmux-mobile`.
 - tmux project: [tmux/tmux](https://github.com/tmux/tmux)
 - Install with Homebrew (macOS):
