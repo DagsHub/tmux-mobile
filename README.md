@@ -33,6 +33,7 @@ node dist/backend/cli.js
 - If you do not provide `--password`, a random password is generated.
 - Password is printed separately (not in URL query parameters).
 - You can disable password checks for trusted local workflows with `--no-require-password`.
+- Full security architecture, risk model, and operational guidance: [SECURITY.md](./SECURITY.md)
 
 ## Versioning
 
