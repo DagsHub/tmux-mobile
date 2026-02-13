@@ -8,7 +8,12 @@ Use it to control your tmux server from a phone browser, locally or over a Cloud
 
 ## Screenshot
 
+### Amber theme
 ![tmux-mobile screenshot](./screenshot.png)
+
+### Midnight theme
+
+![tmux-mobile midnight screenshot](./screenshot-midnight.png)
 
 ## Prerequisites
 
