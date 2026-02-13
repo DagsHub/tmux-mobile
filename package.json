@@ -1,6 +1,6 @@
 {
   "name": "tmux-mobile",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Mobile-first tmux web interface over cloudflared",
   "license": "MIT",
   "repository": {
