@@ -23,8 +23,7 @@ Open either URL directly on your phone.
 
 ```bash
 npm install
-npm run build
-node dist/backend/cli.js
+npm start
 ```
 
 ## Security Defaults

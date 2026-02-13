@@ -37,6 +37,7 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:backend": "tsc -p tsconfig.backend.json",
     "build:frontend": "vite build --config vite.config.ts",
+    "start": "npm run build && node dist/backend/cli.js",
     "typecheck": "tsc -p tsconfig.backend.json --noEmit && tsc -p tsconfig.frontend.json --noEmit",
     "test:smoke": "REAL_TMUX_SMOKE=1 vitest run tests/smoke/real-tmux.test.ts",
     "test:e2e": "npm run build && playwright test",
