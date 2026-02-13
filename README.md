@@ -127,3 +127,4 @@ npm run test:smoke
 ## Acknowledgements
 
 - Inspired by [porterminal](https://github.com/lyehe/porterminal).
+- Made with 🐶 by DagsHub.
