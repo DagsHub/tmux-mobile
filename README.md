@@ -6,6 +6,10 @@ Mobile-first tmux web client with a Node.js backend and React + xterm frontend.
 
 Use it to control your tmux server from a phone browser, locally or over a Cloudflare quick tunnel.
 
+## Screenshot
+
+![tmux-mobile screenshot](./screenshot.png)
+
 ## Prerequisites
 
 - `tmux` must be installed on the machine running `tmux-mobile`.
