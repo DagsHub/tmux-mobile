@@ -32,7 +32,7 @@
   },
   "scripts": {
     "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "dev:backend": "tsx watch src/backend/cli.ts",
+    "dev:backend": "VITE_DEV_MODE=1 tsx watch src/backend/cli.ts",
     "dev:frontend": "vite --config vite.config.ts",
     "build": "npm run build:frontend && npm run build:backend",
     "build:backend": "tsc -p tsconfig.backend.json",

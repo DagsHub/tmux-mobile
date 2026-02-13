@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -76,22 +77,31 @@ const printConnectionInfo = (
   localUrl: string,
   tunnelUrl: string | undefined,
   token: string,
-  password?: string
+  password?: string,
+  isDevMode: boolean = false
 ): void => {
-  const localWithToken = buildLaunchUrl(localUrl, token);
-  console.log(`Local URL: ${localWithToken}`);
+  const frontendPort = isDevMode ? 5173 : 8767;
+  const frontendUrl = `http://localhost:${frontendPort}`;
+  const localWithToken = buildLaunchUrl(frontendUrl, token);
+
+  console.log("\n═══════════════════════════════════════");
+  console.log(`Frontend: ${frontendUrl}${isDevMode ? " (Vite dev)" : ""}`);
+  console.log(`Backend:  ${localUrl}`);
+  console.log("═══════════════════════════════════════");
+  console.log(`\nOpen this URL in your browser:\n${localWithToken}`);
   if (password) {
-    console.log(`Password: ${password}`);
+    console.log(`\nPassword: ${password}`);
   }
 
   if (tunnelUrl) {
     const tunnelWithToken = buildLaunchUrl(tunnelUrl, token);
-    console.log(`Tunnel URL: ${tunnelWithToken}`);
+    console.log(`\nTunnel URL: ${tunnelWithToken}`);
     qrcode.generate(tunnelWithToken, { small: true });
     return;
   }
 
   qrcode.generate(localWithToken, { small: true });
+  console.log("");
 };
 
 const main = async (): Promise<void> => {
@@ -135,8 +145,11 @@ const main = async (): Promise<void> => {
 
   await runningServer.start();
 
+  // Check if running in dev mode (set by npm run dev:backend)
+  const isDevMode = process.env.VITE_DEV_MODE === "1";
+
   let tunnelUrl: string | undefined;
-  if (args.tunnel) {
+  if (args.tunnel && !isDevMode) {
     try {
       const tunnel = await cloudflaredManager.start(args.port);
       tunnelUrl = tunnel.publicUrl;
@@ -145,7 +158,7 @@ const main = async (): Promise<void> => {
     }
   }
 
-  printConnectionInfo(`http://localhost:${args.port}`, tunnelUrl, authService.token, effectivePassword);
+  printConnectionInfo(`http://localhost:${args.port}`, tunnelUrl, authService.token, effectivePassword, isDevMode);
 
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = async (): Promise<void> => {

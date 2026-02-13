@@ -143,6 +143,10 @@ export class TmuxCliExecutor implements TmuxGateway {
     await this.runTmux(["select-pane", "-t", paneId]);
   }
 
+  public async zoomPane(paneId: string): Promise<void> {
+    await this.runTmux(["resize-pane", "-Z", "-t", paneId]);
+  }
+
   public async capturePane(paneId: string, lines: number): Promise<string> {
     return this.runTmux(["capture-pane", "-t", paneId, "-p", "-S", `-${lines}`]);
   }

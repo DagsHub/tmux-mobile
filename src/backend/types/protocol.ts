@@ -8,6 +8,7 @@ export type ControlClientMessage =
   | { type: "select_pane"; paneId: string }
   | { type: "split_pane"; paneId: string; orientation: "h" | "v" }
   | { type: "kill_pane"; paneId: string }
+  | { type: "zoom_pane"; paneId: string }
   | { type: "capture_scrollback"; paneId: string; lines?: number }
   | { type: "send_compose"; text: string };
 

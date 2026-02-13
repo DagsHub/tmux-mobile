@@ -19,6 +19,7 @@ export interface TmuxGateway {
   splitWindow(paneId: string, orientation: "h" | "v"): Promise<void>;
   killPane(paneId: string): Promise<void>;
   selectPane(paneId: string): Promise<void>;
+  zoomPane(paneId: string): Promise<void>;
   capturePane(paneId: string, lines: number): Promise<string>;
 }
 

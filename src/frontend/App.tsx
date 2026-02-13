@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { themes } from "./themes";
 import type {
   ControlServerMessage,
   TmuxPaneState,
@@ -71,6 +72,12 @@ export const App = () => {
     shift: "off"
   });
   const modifierTapRef = useRef<{ key: ModifierKey; at: number } | null>(null);
+
+  const [theme, setTheme] = useState(localStorage.getItem("tmux-mobile-theme") ?? "midnight");
+  const [toolbarExpanded, setToolbarExpanded] = useState(
+    localStorage.getItem("tmux-mobile-toolbar-expanded") === "true"
+  );
+  const [toolbarDeepExpanded, setToolbarDeepExpanded] = useState(false);
 
   const activeSession: TmuxSessionState | undefined = useMemo(() => {
     const selected = snapshot.sessions.find((session) => session.name === attachedSession);
@@ -348,17 +355,28 @@ export const App = () => {
       });
   }, []);
 
+  // Theme effect: apply data-theme attribute, persist, update xterm theme
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("tmux-mobile-theme", theme);
+    const themeConfig = themes[theme];
+    if (themeConfig && terminalRef.current) {
+      terminalRef.current.options.theme = themeConfig.xterm;
+    }
+  }, [theme]);
+
   useEffect(() => {
     if (!terminalContainerRef.current || terminalRef.current) {
       return;
     }
 
     const initialFontSize = getPreferredTerminalFontSize();
+    const themeConfig = themes[theme];
     const terminal = new Terminal({
       cursorBlink: true,
       fontFamily: "Menlo, Monaco, 'Courier New', monospace",
       fontSize: initialFontSize,
-      theme: {
+      theme: themeConfig?.xterm ?? {
         background: "#0d1117",
         foreground: "#d1e4ff",
         cursor: "#93c5fd"
@@ -415,6 +433,11 @@ export const App = () => {
     };
   }, []);
 
+  // Persist toolbar expanded state
+  useEffect(() => {
+    localStorage.setItem("tmux-mobile-toolbar-expanded", toolbarExpanded ? "true" : "false");
+  }, [toolbarExpanded]);
+
   const submitPassword = (): void => {
     setPasswordErrorMessage("");
     openControlSocket(password);
@@ -432,6 +455,10 @@ export const App = () => {
     const selected = window.getSelection()?.toString() || scrollbackText;
     await navigator.clipboard.writeText(selected);
     setStatusMessage("Copied to clipboard");
+  };
+
+  const focusTerminal = (): void => {
+    terminalRef.current?.focus();
   };
 
   return (
@@ -472,29 +499,36 @@ export const App = () => {
         />
       </main>
 
-      <section className="toolbar">
-        <div className="toolbar-row">
+      <section className="toolbar" onMouseUp={focusTerminal}>
+        {/* Row 1 — Primary (always visible) */}
+        <div className="toolbar-row-primary">
           <button onClick={() => sendTerminal("\u001b")}>Esc</button>
-          <button onClick={() => sendTerminal("1")}>1</button>
-          <button onClick={() => sendTerminal("2")}>2</button>
-          <button onClick={() => sendTerminal("3")}>3</button>
+          <button className={`modifier ${modifiers.ctrl}`} onClick={() => toggleModifier("ctrl")}>Ctrl</button>
           <button onClick={() => sendTerminal("\t")}>Tab</button>
           <button onClick={() => sendTerminal("/")}>/</button>
-          <button onClick={() => sendTerminal("\u001b[3~")}>Del</button>
-          <button onClick={() => sendTerminal("\u007f")}>BS</button>
-          <button onClick={() => sendTerminal("\u001b[H")}>Hm</button>
-          <button onClick={() => sendTerminal("\u001b[A")}>↑</button>
-          <button onClick={() => sendTerminal("\u001b[F")}>Ed</button>
+          <button onClick={() => sendTerminal("@")}>@</button>
+          <button className="danger" onClick={() => sendTerminal("\u0003", false)}>^C</button>
+          <button onClick={() => sendTerminal("\u0002", false)}>^B</button>
           <button onClick={() => sendTerminal("\r")}>Enter</button>
+          <button
+            className="toolbar-expand-btn"
+            onClick={() => {
+              setToolbarExpanded((v) => !v);
+              if (toolbarExpanded) {
+                setToolbarDeepExpanded(false);
+              }
+            }}
+          >
+            {toolbarExpanded ? "..." : "..."}
+          </button>
         </div>
-        <div className="toolbar-row">
-          <button className={`modifier ${modifiers.ctrl}`} onClick={() => toggleModifier("ctrl")}>Ctrl</button>
+
+        {/* Expanded section (collapsible) */}
+        <div className={`toolbar-row-secondary ${toolbarExpanded ? "expanded" : ""}`}>
           <button className={`modifier ${modifiers.alt}`} onClick={() => toggleModifier("alt")}>Alt</button>
           <button className={`modifier ${modifiers.shift}`} onClick={() => toggleModifier("shift")}>Sft</button>
           <button onClick={() => sendTerminal("\u0004", false)}>^D</button>
-          <button className="danger" onClick={() => sendTerminal("\u0003", false)}>^C</button>
           <button onClick={() => sendTerminal("\u000c", false)}>^L</button>
-          <button onClick={() => sendTerminal("\u0002", false)}>^B</button>
           <button
             onClick={async () => {
               const clip = await navigator.clipboard.readText();
@@ -503,6 +537,46 @@ export const App = () => {
           >
             Paste
           </button>
+          <button onClick={() => sendTerminal("\u001b[3~")}>Del</button>
+        </div>
+
+        {/* Deep section (collapsible from within expanded) */}
+        {toolbarExpanded && (
+          <>
+            <button
+              className="toolbar-expand-btn"
+              style={{ justifySelf: "start", fontSize: "0.8rem", padding: "0.2rem 0.5rem", minHeight: "1.6rem" }}
+              onClick={() => setToolbarDeepExpanded((v) => !v)}
+            >
+              {toolbarDeepExpanded ? "F-keys ▲" : "F-keys ▼"}
+            </button>
+            <div className={`toolbar-row-deep ${toolbarDeepExpanded ? "expanded" : ""}`}>
+              <div className="toolbar-row-deep-fkeys">
+                {[
+                  "\u001bOP", "\u001bOQ", "\u001bOR", "\u001bOS",
+                  "\u001b[15~", "\u001b[17~", "\u001b[18~", "\u001b[19~",
+                  "\u001b[20~", "\u001b[21~", "\u001b[23~", "\u001b[24~"
+                ].map((seq, i) => (
+                  <button key={`f${i + 1}`} onClick={() => sendTerminal(seq, false)}>
+                    F{i + 1}
+                  </button>
+                ))}
+              </div>
+              <div className="toolbar-row-deep-nav">
+                <button onClick={() => sendTerminal("\u001b[5~")}>PgUp</button>
+                <button onClick={() => sendTerminal("\u001b[6~")}>PgDn</button>
+                <button onClick={() => sendTerminal("\u001b[2~")}>Ins</button>
+                <button onClick={() => sendTerminal("")}>CapsLk</button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Row 2 — Navigation (always visible) */}
+        <div className="toolbar-row-nav">
+          <button onClick={() => sendTerminal("\u001b[H")}>Hm</button>
+          <button onClick={() => sendTerminal("\u001b[A")}>↑</button>
+          <button onClick={() => sendTerminal("\u001b[F")}>Ed</button>
           <button onClick={() => sendTerminal("\u001b[D")}>←</button>
           <button onClick={() => sendTerminal("\u001b[B")}>↓</button>
           <button onClick={() => sendTerminal("\u001b[C")}>→</button>
@@ -637,6 +711,15 @@ export const App = () => {
                 Split V
               </button>
             </div>
+            <button
+              className="drawer-section-action"
+              onClick={() =>
+                activePane && sendControl({ type: "zoom_pane", paneId: activePane.id })
+              }
+              disabled={!activePane || !activeWindow || activeWindow.paneCount <= 1}
+            >
+              Zoom Pane
+            </button>
 
             <button
               className="drawer-section-action"
@@ -660,6 +743,19 @@ export const App = () => {
             >
               Kill Window
             </button>
+
+            <h3>Appearance</h3>
+            <div className="theme-picker" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+              {Object.entries(themes).map(([key, config]) => (
+                <button
+                  key={key}
+                  className={theme === key ? "active" : ""}
+                  onClick={() => setTheme(key)}
+                >
+                  {config.name}
+                </button>
+              ))}
+            </div>
           </aside>
         </div>
       )}

@@ -195,6 +195,9 @@ export const createTmuxMobileServer = (
       case "kill_pane":
         await deps.tmux.killPane(message.paneId);
         return;
+      case "zoom_pane":
+        await deps.tmux.zoomPane(message.paneId);
+        return;
       case "capture_scrollback": {
         const lines = message.lines ?? config.scrollbackLines;
         const output = await deps.tmux.capturePane(message.paneId, lines);
