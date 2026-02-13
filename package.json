@@ -55,7 +55,7 @@
     "node-pty": "^1.0.0",
     "qrcode-terminal": "^0.12.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-dom": "^19.2.4",
     "ws": "^8.18.3",
     "yargs": "^17.7.2",
     "zod": "^3.24.1"
@@ -68,7 +68,7 @@
     "@types/node": "^22.10.2",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
+    "@types/react-dom": "^19.2.3",
     "@types/supertest": "^6.0.2",
     "@types/ws": "^8.5.13",
     "@types/yargs": "^17.0.35",
