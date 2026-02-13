@@ -440,54 +440,29 @@ input {
   border-top: 1px solid var(--border-subtle);
 }
 
-.toolbar-row-primary {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+.toolbar-main {
+  display: flex;
   gap: 0.25rem;
+  align-items: stretch;
 }
 
-.toolbar-row-primary button:nth-child(n+10) {
-  display: none;
-}
-
-.toolbar-row-nav {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 0.25rem;
-}
-
-.toolbar-row-nav button:nth-child(1) {
-  grid-column: 1;
-}
-
-.toolbar-row-nav button:nth-child(2) {
-  grid-column: 2;
-}
-
-.toolbar-row-nav button:nth-child(3) {
-  grid-column: 3;
-}
-
-.toolbar-row-nav button:nth-child(4) {
-  grid-column: 10;
-}
-
-.toolbar-row-nav button:nth-child(5) {
-  grid-column: 11;
-}
-
-.toolbar-row-nav button:nth-child(6) {
-  grid-column: 12;
+.toolbar-main > button {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .toolbar-row-secondary {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  display: flex;
   gap: 0.25rem;
   overflow: hidden;
   max-height: 0;
   transition: max-height 0.2s ease-out, padding 0.2s ease-out;
   padding: 0;
+}
+
+.toolbar-row-secondary > button {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .toolbar-row-secondary.expanded {
@@ -692,11 +667,6 @@ button.danger {
 }
 
 @media (orientation: landscape) {
-  .toolbar-row-primary,
-  .toolbar-row-nav {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-  }
-
   .toolbar-row-deep-fkeys {
     grid-template-columns: repeat(12, minmax(0, 1fr));
   }
