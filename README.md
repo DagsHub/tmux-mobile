@@ -1,8 +1,27 @@
 # tmux-mobile
 
+![tmux-mobile banner](./banner.jpg)
+
 Mobile-first tmux web client with a Node.js backend and React + xterm frontend.
 
 Use it to control your tmux server from a phone browser, locally or over a Cloudflare quick tunnel.
+
+## Prerequisites
+
+- `tmux` must be installed on the machine running `tmux-mobile`.
+- tmux project: [tmux/tmux](https://github.com/tmux/tmux)
+- Install with Homebrew (macOS):
+
+```bash
+brew install tmux
+```
+
+- Recommended: enable tmux mouse mode so you can switch panes by tapping in the mobile UI.
+
+```bash
+echo 'set -g mouse on' >> ~/.tmux.conf
+tmux source-file ~/.tmux.conf
+```
 
 ## Quick Start
 
@@ -89,16 +108,6 @@ The automated harness avoids manual QA by validating the tmux protocol flow end-
 npm run test:smoke
 ```
 
-## GitHub Actions
+## Acknowledgements
 
-- `CI` (`.github/workflows/ci.yml`)
-  - runs typecheck, tests, build, and `npm pack --dry-run` on push/PR
-  - runs browser E2E tests (Playwright Chromium)
-  - runs a real tmux smoke job on Ubuntu
-- `Publish` (`.github/workflows/publish.yml`)
-  - triggered manually or by GitHub Release publish
-  - runs tests + build and publishes to npm with provenance
-
-Required repository secret for publish:
-
-- `NPM_TOKEN`: npm automation token with publish rights for `tmux-mobile`
+- Inspired by [porterminal](https://github.com/lyehe/porterminal).
