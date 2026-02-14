@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -6,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
+import { ApprovalService } from "./auth/approval-service.js";
 import { AuthService } from "./auth/auth-service.js";
 import { CloudflaredManager } from "./cloudflared/manager.js";
 import type { CliArgs, RuntimeConfig } from "./config.js";
@@ -52,6 +54,16 @@ const parseCliArgs = async (): Promise<CliArgs> => {
       type: "string",
       describe: "Write debug logs to a file"
     })
+    .option("no-approve", {
+      type: "boolean",
+      default: false,
+      describe: "Disable connection approval TUI (reject passwordless connections)"
+    })
+    .option("jwt-lifetime", {
+      type: "number",
+      default: 86400,
+      describe: "JWT token lifetime in seconds"
+    })
     .strict()
     .help()
     .parseAsync();
@@ -63,7 +75,9 @@ const parseCliArgs = async (): Promise<CliArgs> => {
     tunnel: argv.tunnel,
     session: argv.session,
     scrollback: argv.scrollback,
-    debugLog: argv.debugLog
+    debugLog: argv.debugLog,
+    noApprove: argv.noApprove,
+    jwtLifetime: argv.jwtLifetime
   };
 };
 
@@ -112,6 +126,12 @@ const main = async (): Promise<void> => {
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
   const frontendDir = path.resolve(cliDir, "../frontend");
 
+  const approvalEnabled = !args.noApprove;
+  const jwtSecret = crypto.randomBytes(32);
+  const approvalService = approvalEnabled
+    ? new ApprovalService({ jwtSecret, jwtLifetimeSecs: args.jwtLifetime })
+    : undefined;
+
   const config: RuntimeConfig = {
     port: args.port,
     host: "127.0.0.1",
@@ -121,7 +141,9 @@ const main = async (): Promise<void> => {
     scrollbackLines: args.scrollback,
     pollIntervalMs: 2_500,
     token: authService.token,
-    frontendDir
+    frontendDir,
+    approvalEnabled,
+    jwtLifetimeSecs: args.jwtLifetime
   };
 
   const cloudflaredManager = new CloudflaredManager();
@@ -135,6 +157,7 @@ const main = async (): Promise<void> => {
     tmux,
     ptyFactory,
     authService,
+    approvalService,
     logger
   });
 
@@ -158,6 +181,11 @@ const main = async (): Promise<void> => {
   }
 
   printConnectionInfo(`http://localhost:${args.port}`, tunnelUrl, authService.token, effectivePassword, isDevMode);
+
+  if (approvalService) {
+    const { renderApprovalTui } = await import("./tui/approval-tui.js");
+    renderApprovalTui(approvalService);
+  }
 
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = async (): Promise<void> => {

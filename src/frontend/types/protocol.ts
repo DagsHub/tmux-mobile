@@ -33,6 +33,9 @@ export interface TmuxStateSnapshot {
 export type ControlServerMessage =
   | { type: "auth_ok"; clientId: string; requiresPassword: boolean }
   | { type: "auth_error"; reason: string }
+  | { type: "auth_pending"; challengeCode: string }
+  | { type: "auth_approved"; jwt: string; clientId: string }
+  | { type: "auth_denied"; reason: string }
   | { type: "attached"; session: string }
   | { type: "session_picker"; sessions: TmuxSessionSummary[] }
   | { type: "tmux_state"; state: TmuxStateSnapshot }
