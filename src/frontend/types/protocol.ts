@@ -30,6 +30,20 @@ export interface TmuxStateSnapshot {
   capturedAt: string;
 }
 
+export type ControlClientMessage =
+  | { type: "auth"; token?: string; password?: string }
+  | { type: "select_session"; session: string }
+  | { type: "new_session"; name: string }
+  | { type: "new_window"; session: string }
+  | { type: "select_window"; session: string; windowIndex: number }
+  | { type: "kill_window"; session: string; windowIndex: number }
+  | { type: "select_pane"; paneId: string; stickyZoom?: boolean }
+  | { type: "split_pane"; paneId: string; orientation: "h" | "v" }
+  | { type: "kill_pane"; paneId: string }
+  | { type: "zoom_pane"; paneId: string }
+  | { type: "capture_scrollback"; paneId: string; lines?: number }
+  | { type: "send_compose"; text: string };
+
 export type ControlServerMessage =
   | { type: "auth_ok"; clientId: string; requiresPassword: boolean }
   | { type: "auth_error"; reason: string }

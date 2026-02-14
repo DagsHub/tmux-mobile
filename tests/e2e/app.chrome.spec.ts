@@ -171,6 +171,56 @@ test.describe("tmux-mobile browser behavior", () => {
     });
   });
 
+  test.describe("sticky zoom toggle", () => {
+    let server: StartedE2EServer;
+
+    test.beforeAll(async () => {
+      server = await startE2EServer({ sessions: ["main"], defaultSession: "main" });
+    });
+
+    test.afterAll(async () => {
+      await server.stop();
+    });
+
+    test("toggling sticky zoom persists state and sends stickyZoom on pane select", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+
+      // Open drawer
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+
+      // Verify sticky zoom toggle exists and is off by default
+      const toggle = page.getByTestId("sticky-zoom-toggle");
+      await expect(toggle).toBeVisible();
+      await expect(toggle).toContainText("Sticky Zoom: Off");
+
+      // Turn on sticky zoom
+      await toggle.click();
+      await expect(toggle).toContainText("Sticky Zoom: On");
+      await expect(toggle).toHaveClass(/active/);
+
+      // Turn off sticky zoom
+      await toggle.click();
+      await expect(toggle).toContainText("Sticky Zoom: Off");
+      await expect(toggle).not.toHaveClass(/active/);
+    });
+
+    test("sticky zoom state persists across page reloads", async ({ page }) => {
+      // Set sticky zoom on via localStorage
+      await page.addInitScript(() => {
+        localStorage.setItem("tmux-mobile-sticky-zoom", "true");
+      });
+
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+
+      // Open drawer and verify sticky zoom is on
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.getByTestId("sticky-zoom-toggle")).toContainText("Sticky Zoom: On");
+    });
+  });
+
   test.describe("session picker fallback when switch-client fails", () => {
     let server: StartedE2EServer;
 

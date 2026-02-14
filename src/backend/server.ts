@@ -192,6 +192,9 @@ export const createTmuxMobileServer = (
         return;
       case "select_pane":
         await deps.tmux.selectPane(message.paneId);
+        if (message.stickyZoom) {
+          await deps.tmux.zoomPane(message.paneId);
+        }
         return;
       case "split_pane":
         await deps.tmux.splitWindow(message.paneId, message.orientation);

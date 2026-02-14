@@ -182,6 +182,45 @@ describe("tmux mobile server", () => {
     control.close();
   });
 
+  test("select_pane with stickyZoom calls both selectPane and zoomPane", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    await waitForMessage(control, (msg: { type: string }) => msg.type === "attached");
+
+    const snapshot = await buildSnapshot(tmux);
+    const paneId = snapshot.sessions[0].windowStates[0].panes[0].id;
+
+    // Split to create a second pane
+    control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const updatedSnapshot = await buildSnapshot(tmux);
+    const secondPaneId = updatedSnapshot.sessions[0].windowStates[0].panes[1].id;
+
+    // Clear calls to isolate the select_pane + stickyZoom behavior
+    tmux.calls.length = 0;
+
+    // Select the first pane with stickyZoom enabled
+    control.send(JSON.stringify({ type: "select_pane", paneId, stickyZoom: true }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(tmux.calls).toContain(`selectPane:${paneId}`);
+    expect(tmux.calls).toContain(`zoomPane:${paneId}`);
+
+    // Clear and verify without stickyZoom
+    tmux.calls.length = 0;
+    control.send(JSON.stringify({ type: "select_pane", paneId: secondPaneId }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(tmux.calls).toContain(`selectPane:${secondPaneId}`);
+    expect(tmux.calls).not.toContain(`zoomPane:${secondPaneId}`);
+
+    control.close();
+  });
+
   test("stop is idempotent when called repeatedly", async () => {
     await runningServer.stop();
     await runningServer.stop();
