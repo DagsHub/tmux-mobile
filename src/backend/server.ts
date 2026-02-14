@@ -41,6 +41,10 @@ export interface RunningServer {
   config: RuntimeConfig;
 }
 
+export const frontendFallbackRoute = "/{*path}";
+
+export const isWebSocketPath = (requestPath: string): boolean => requestPath.startsWith("/ws/");
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -81,8 +85,8 @@ export const createTmuxMobileServer = (
   });
 
   app.use(express.static(config.frontendDir));
-  app.get("*path", (req, res) => {
-    if (req.path.startsWith("/ws/")) {
+  app.get(frontendFallbackRoute, (req, res) => {
+    if (isWebSocketPath(req.path)) {
       res.status(404).end();
       return;
     }
