@@ -376,7 +376,7 @@ export const App = () => {
     const themeConfig = themes[theme];
     const terminal = new Terminal({
       cursorBlink: true,
-      fontFamily: "'MesloLGS NF', 'MesloLGM NF', 'Hack Nerd Font', 'FiraCode Nerd Font', 'JetBrainsMono Nerd Font', 'DejaVuSansM Nerd Font', Menlo, Monaco, 'Courier New', monospace",
+      fontFamily: "'MesloLGS NF', 'MesloLGM NF', 'Hack Nerd Font', 'FiraCode Nerd Font', 'JetBrainsMono Nerd Font', 'DejaVu Sans Mono Nerd Font', Menlo, Monaco, 'Courier New', monospace",
       fontSize: initialFontSize,
       theme: themeConfig?.xterm ?? {
         background: "#0d1117",
