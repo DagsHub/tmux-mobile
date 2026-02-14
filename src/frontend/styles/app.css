@@ -376,6 +376,20 @@ input {
   gap: 0.35rem;
 }
 
+.screenshot-proof-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid #facc15;
+  background: rgba(250, 204, 21, 0.16);
+  color: #fef08a;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .top-status {
   width: 0.7rem;
   height: 0.7rem;

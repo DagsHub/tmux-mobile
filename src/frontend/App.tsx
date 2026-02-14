@@ -477,6 +477,7 @@ export const App = () => {
           Window: {activeWindow ? `${activeWindow.index}: ${activeWindow.name}` : "-"}
         </div>
         <div className="top-actions">
+          <span className="screenshot-proof-badge">Screenshot Check</span>
           <span
             className={`top-status ${topStatus.kind}`}
             title={topStatus.label}
