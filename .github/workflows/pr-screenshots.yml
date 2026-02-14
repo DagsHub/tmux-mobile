@@ -47,7 +47,10 @@ jobs:
           retention-days: 30
 
       - name: Post screenshots to PR
-        if: always() && hashFiles('screenshots/*.png') != ''
+        if: >
+          always() &&
+          hashFiles('screenshots/*.png') != '' &&
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         with:
           script: |

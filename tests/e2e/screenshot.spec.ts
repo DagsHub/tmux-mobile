@@ -1,14 +1,16 @@
 import { expect, test } from "@playwright/test";
 import { startE2EServer, type StartedE2EServer } from "./harness/test-server.js";
 
-let server: StartedE2EServer;
+let server: StartedE2EServer | undefined;
 
 test.beforeAll(async () => {
   server = await startE2EServer({ sessions: ["main"], defaultSession: "main" });
 });
 
 test.afterAll(async () => {
-  await server.stop();
+  if (server) {
+    await server.stop();
+  }
 });
 
 test("capture UI screenshot for PR preview", async ({ page }) => {
