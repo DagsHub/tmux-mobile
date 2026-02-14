@@ -7,5 +7,5 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["src/backend/**/*.ts"]
+  "include": ["src/backend/**/*.ts", "src/backend/**/*.tsx"]
 }
