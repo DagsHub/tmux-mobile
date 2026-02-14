@@ -150,4 +150,24 @@ export class TmuxCliExecutor implements TmuxGateway {
   public async capturePane(paneId: string, lines: number): Promise<string> {
     return this.runTmux(["capture-pane", "-t", paneId, "-p", "-S", `-${lines}`]);
   }
+
+  public async renameSession(oldName: string, newName: string): Promise<void> {
+    await this.runTmux(["rename-session", "-t", oldName, newName]);
+  }
+
+  public async renameWindow(session: string, windowIndex: number, newName: string): Promise<void> {
+    await this.runTmux(["rename-window", "-t", `${session}:${windowIndex}`, newName]);
+  }
+
+  public async respawnPane(paneId: string): Promise<void> {
+    await this.runTmux(["respawn-pane", "-k", "-t", paneId]);
+  }
+
+  public async breakPane(paneId: string): Promise<void> {
+    await this.runTmux(["break-pane", "-t", paneId]);
+  }
+
+  public async swapWindow(session: string, srcIndex: number, dstIndex: number): Promise<void> {
+    await this.runTmux(["swap-window", "-s", `${session}:${srcIndex}`, "-t", `${session}:${dstIndex}`]);
+  }
 }

@@ -62,6 +62,9 @@ export const App = () => {
   const [composeEnabled, setComposeEnabled] = useState(true);
   const [composeText, setComposeText] = useState("");
 
+  const [openMenu, setOpenMenu] = useState<{ kind: "session" | "window" | "pane"; id: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ label: string; onConfirm: () => void } | null>(null);
+
   const [scrollbackVisible, setScrollbackVisible] = useState(false);
   const [scrollbackText, setScrollbackText] = useState("");
   const [scrollbackLines, setScrollbackLines] = useState(1000);
@@ -610,7 +613,7 @@ export const App = () => {
       {drawerOpen && (
         <div
           className="drawer-backdrop"
-          onClick={() => setDrawerOpen(false)}
+          onClick={() => { setDrawerOpen(false); setOpenMenu(null); }}
           data-testid="drawer-backdrop"
         >
           <aside className="drawer" onClick={(event) => event.stopPropagation()}>
@@ -625,16 +628,51 @@ export const App = () => {
 
             <h3>Sessions</h3>
             <ul data-testid="sessions-list">
-              {snapshot.sessions.map((session) => (
-                <li key={session.name}>
-                  <button
-                    onClick={() => sendControl({ type: "select_session", session: session.name })}
-                    className={session.name === (attachedSession || activeSession?.name) ? "active" : ""}
-                  >
-                    {session.name} {session.attached ? "*" : ""}
-                  </button>
-                </li>
-              ))}
+              {snapshot.sessions.map((session) => {
+                const sessionMenuId = `session:${session.name}`;
+                const isMenuOpen = openMenu?.kind === "session" && openMenu.id === sessionMenuId;
+                return (
+                  <li key={session.name}>
+                    <div className="drawer-item">
+                      <button
+                        onClick={() => sendControl({ type: "select_session", session: session.name })}
+                        className={session.name === (attachedSession || activeSession?.name) ? "active" : ""}
+                      >
+                        {session.name} {session.attached ? "*" : ""}
+                      </button>
+                      <button
+                        className="kebab-btn"
+                        onClick={() => setOpenMenu(isMenuOpen ? null : { kind: "session", id: sessionMenuId })}
+                        aria-label={`Actions for session ${session.name}`}
+                      >
+                        ⋮
+                      </button>
+                    </div>
+                    {isMenuOpen && (
+                      <div className="kebab-dropdown">
+                        <button onClick={() => {
+                          setOpenMenu(null);
+                          const newName = window.prompt("Rename session", session.name);
+                          if (newName && newName !== session.name) {
+                            sendControl({ type: "rename_session", session: session.name, newName });
+                          }
+                        }}>Rename</button>
+                        <button onClick={() => {
+                          setOpenMenu(null);
+                          sendControl({ type: "new_window", session: session.name });
+                        }}>New Window</button>
+                        <button className="destructive" onClick={() => {
+                          setOpenMenu(null);
+                          setConfirmAction({
+                            label: `Kill session "${session.name}"?`,
+                            onConfirm: () => sendControl({ type: "kill_session", session: session.name })
+                          });
+                        }}>Kill Session</button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
             <button
               className="drawer-section-action"
@@ -647,22 +685,76 @@ export const App = () => {
             <h3>Windows ({activeSession?.name ?? "-"})</h3>
             <ul data-testid="windows-list">
               {activeSession
-                ? activeSession.windowStates.map((windowState) => (
-                    <li key={`${activeSession.name}-${windowState.index}`}>
-                      <button
-                        onClick={() =>
-                          sendControl({
-                            type: "select_window",
-                            session: activeSession.name,
-                            windowIndex: windowState.index
-                          })
-                        }
-                        className={windowState.active ? "active" : ""}
-                      >
-                        {windowState.index}: {windowState.name} {windowState.active ? "*" : ""}
-                      </button>
-                    </li>
-                  ))
+                ? activeSession.windowStates.map((windowState, _idx, allWindows) => {
+                    const windowMenuId = `window:${activeSession.name}:${windowState.index}`;
+                    const isMenuOpen = openMenu?.kind === "window" && openMenu.id === windowMenuId;
+                    return (
+                      <li key={`${activeSession.name}-${windowState.index}`}>
+                        <div className="drawer-item">
+                          <button
+                            onClick={() =>
+                              sendControl({
+                                type: "select_window",
+                                session: activeSession.name,
+                                windowIndex: windowState.index
+                              })
+                            }
+                            className={windowState.active ? "active" : ""}
+                          >
+                            {windowState.index}: {windowState.name} {windowState.active ? "*" : ""}
+                          </button>
+                          <button
+                            className="kebab-btn"
+                            onClick={() => setOpenMenu(isMenuOpen ? null : { kind: "window", id: windowMenuId })}
+                            aria-label={`Actions for window ${windowState.index}`}
+                          >
+                            ⋮
+                          </button>
+                        </div>
+                        {isMenuOpen && (
+                          <div className="kebab-dropdown">
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              const newName = window.prompt("Rename window", windowState.name);
+                              if (newName && newName !== windowState.name) {
+                                sendControl({ type: "rename_window", session: activeSession.name, windowIndex: windowState.index, newName });
+                              }
+                            }}>Rename</button>
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              sendControl({ type: "split_pane", paneId: windowState.panes[0]?.id ?? "", orientation: "h" });
+                            }}>Split Horizontal</button>
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              sendControl({ type: "split_pane", paneId: windowState.panes[0]?.id ?? "", orientation: "v" });
+                            }}>Split Vertical</button>
+                            {windowState.index > 0 && (
+                              <button onClick={() => {
+                                setOpenMenu(null);
+                                sendControl({ type: "swap_window", session: activeSession.name, srcIndex: windowState.index, dstIndex: windowState.index - 1 });
+                              }}>Move Up</button>
+                            )}
+                            {windowState.index < allWindows[allWindows.length - 1].index && (
+                              <button onClick={() => {
+                                setOpenMenu(null);
+                                const nextWindow = allWindows.find((w) => w.index > windowState.index);
+                                if (nextWindow) {
+                                  sendControl({ type: "swap_window", session: activeSession.name, srcIndex: windowState.index, dstIndex: nextWindow.index });
+                                }
+                              }}>Move Down</button>
+                            )}
+                            <button className="destructive" onClick={() => {
+                              setOpenMenu(null);
+                              setConfirmAction({
+                                label: `Kill window ${windowState.index}: ${windowState.name}?`,
+                                onConfirm: () => sendControl({ type: "kill_window", session: activeSession.name, windowIndex: windowState.index })
+                              });
+                            }}>Kill Window</button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })
                 : null}
             </ul>
             <button
@@ -679,70 +771,67 @@ export const App = () => {
             <h3>Panes ({activeWindow ? `${activeWindow.index}` : "-"})</h3>
             <ul>
               {activeWindow
-                ? activeWindow.panes.map((pane) => (
-                    <li key={pane.id}>
-                      <button
-                        onClick={() => sendControl({ type: "select_pane", paneId: pane.id })}
-                        className={pane.active ? "active" : ""}
-                      >
-                        %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
-                      </button>
-                    </li>
-                  ))
+                ? activeWindow.panes.map((pane) => {
+                    const paneMenuId = `pane:${pane.id}`;
+                    const isMenuOpen = openMenu?.kind === "pane" && openMenu.id === paneMenuId;
+                    return (
+                      <li key={pane.id}>
+                        <div className="drawer-item">
+                          <button
+                            onClick={() => sendControl({ type: "select_pane", paneId: pane.id })}
+                            className={pane.active ? "active" : ""}
+                          >
+                            %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
+                          </button>
+                          <button
+                            className="kebab-btn"
+                            onClick={() => setOpenMenu(isMenuOpen ? null : { kind: "pane", id: paneMenuId })}
+                            aria-label={`Actions for pane ${pane.index}`}
+                          >
+                            ⋮
+                          </button>
+                        </div>
+                        {isMenuOpen && (
+                          <div className="kebab-dropdown">
+                            {activeWindow.paneCount > 1 && (
+                              <button onClick={() => {
+                                setOpenMenu(null);
+                                sendControl({ type: "zoom_pane", paneId: pane.id });
+                              }}>Zoom</button>
+                            )}
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              sendControl({ type: "split_pane", paneId: pane.id, orientation: "h" });
+                            }}>Split Horizontal</button>
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              sendControl({ type: "split_pane", paneId: pane.id, orientation: "v" });
+                            }}>Split Vertical</button>
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              sendControl({ type: "break_pane", paneId: pane.id });
+                            }}>Break to Window</button>
+                            <button className="destructive" onClick={() => {
+                              setOpenMenu(null);
+                              setConfirmAction({
+                                label: `Respawn pane %${pane.index}? This will kill the running process.`,
+                                onConfirm: () => sendControl({ type: "respawn_pane", paneId: pane.id })
+                              });
+                            }}>Respawn Pane</button>
+                            <button className="destructive" onClick={() => {
+                              setOpenMenu(null);
+                              setConfirmAction({
+                                label: `Kill pane %${pane.index}?`,
+                                onConfirm: () => sendControl({ type: "kill_pane", paneId: pane.id })
+                              });
+                            }}>Kill Pane</button>
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })
                 : null}
             </ul>
-            <div className="drawer-grid">
-              <button
-                onClick={() =>
-                  activePane &&
-                  sendControl({ type: "split_pane", paneId: activePane.id, orientation: "h" })
-                }
-                disabled={!activePane}
-              >
-                Split H
-              </button>
-              <button
-                onClick={() =>
-                  activePane &&
-                  sendControl({ type: "split_pane", paneId: activePane.id, orientation: "v" })
-                }
-                disabled={!activePane}
-              >
-                Split V
-              </button>
-            </div>
-            <button
-              className="drawer-section-action"
-              onClick={() =>
-                activePane && sendControl({ type: "zoom_pane", paneId: activePane.id })
-              }
-              disabled={!activePane || !activeWindow || activeWindow.paneCount <= 1}
-            >
-              Zoom Pane
-            </button>
-
-            <button
-              className="drawer-section-action"
-              onClick={() => activePane && sendControl({ type: "kill_pane", paneId: activePane.id })}
-              disabled={!activePane}
-            >
-              Close Pane
-            </button>
-            <button
-              className="drawer-section-action"
-              onClick={() =>
-                activeSession &&
-                activeWindow &&
-                sendControl({
-                  type: "kill_window",
-                  session: activeSession.name,
-                  windowIndex: activeWindow.index
-                })
-              }
-              disabled={!activeSession || !activeWindow}
-            >
-              Kill Window
-            </button>
 
             <h3>Appearance</h3>
             <div className="theme-picker" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
@@ -757,6 +846,26 @@ export const App = () => {
               ))}
             </div>
           </aside>
+        </div>
+      )}
+
+      {confirmAction && (
+        <div className="overlay" data-testid="confirm-overlay">
+          <div className="card confirm-card">
+            <p>{confirmAction.label}</p>
+            <div className="confirm-actions">
+              <button onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button
+                className="destructive"
+                onClick={() => {
+                  confirmAction.onConfirm();
+                  setConfirmAction(null);
+                }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

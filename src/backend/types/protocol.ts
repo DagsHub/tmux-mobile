@@ -10,7 +10,13 @@ export type ControlClientMessage =
   | { type: "kill_pane"; paneId: string }
   | { type: "zoom_pane"; paneId: string }
   | { type: "capture_scrollback"; paneId: string; lines?: number }
-  | { type: "send_compose"; text: string };
+  | { type: "send_compose"; text: string }
+  | { type: "rename_session"; session: string; newName: string }
+  | { type: "rename_window"; session: string; windowIndex: number; newName: string }
+  | { type: "kill_session"; session: string }
+  | { type: "respawn_pane"; paneId: string }
+  | { type: "break_pane"; paneId: string }
+  | { type: "swap_window"; session: string; srcIndex: number; dstIndex: number };
 
 export interface TmuxSessionSummary {
   name: string;

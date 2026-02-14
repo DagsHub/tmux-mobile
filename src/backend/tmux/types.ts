@@ -21,6 +21,11 @@ export interface TmuxGateway {
   selectPane(paneId: string): Promise<void>;
   zoomPane(paneId: string): Promise<void>;
   capturePane(paneId: string, lines: number): Promise<string>;
+  renameSession(oldName: string, newName: string): Promise<void>;
+  renameWindow(session: string, windowIndex: number, newName: string): Promise<void>;
+  respawnPane(paneId: string): Promise<void>;
+  breakPane(paneId: string): Promise<void>;
+  swapWindow(session: string, srcIndex: number, dstIndex: number): Promise<void>;
 }
 
 export const buildSnapshot = async (
