@@ -216,6 +216,26 @@ export const createTmuxMobileServer = (
       case "send_compose":
         runtime.write(`${message.text}\r`);
         return;
+      case "rename_session":
+        await deps.tmux.renameSession(message.session, message.newName);
+        return;
+      case "rename_window":
+        await deps.tmux.renameWindow(message.session, message.windowIndex, message.newName);
+        return;
+      case "kill_session": {
+        await deps.tmux.killSession(message.session);
+        await ensureAttachedSession(socket);
+        return;
+      }
+      case "respawn_pane":
+        await deps.tmux.respawnPane(message.paneId);
+        return;
+      case "break_pane":
+        await deps.tmux.breakPane(message.paneId);
+        return;
+      case "swap_window":
+        await deps.tmux.swapWindow(message.session, message.srcIndex, message.dstIndex);
+        return;
       case "auth":
         return;
       default: {
