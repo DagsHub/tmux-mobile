@@ -79,6 +79,9 @@ export const App = () => {
     localStorage.getItem("tmux-mobile-toolbar-expanded") === "true"
   );
   const [toolbarDeepExpanded, setToolbarDeepExpanded] = useState(false);
+  const [stickyZoom, setStickyZoom] = useState(
+    localStorage.getItem("tmux-mobile-sticky-zoom") === "true"
+  );
 
   const activeSession: TmuxSessionState | undefined = useMemo(() => {
     const selected = snapshot.sessions.find((session) => session.name === attachedSession);
@@ -440,6 +443,11 @@ export const App = () => {
     localStorage.setItem("tmux-mobile-toolbar-expanded", toolbarExpanded ? "true" : "false");
   }, [toolbarExpanded]);
 
+  // Persist sticky zoom state
+  useEffect(() => {
+    localStorage.setItem("tmux-mobile-sticky-zoom", stickyZoom ? "true" : "false");
+  }, [stickyZoom]);
+
   const submitPassword = (): void => {
     setPasswordErrorMessage("");
     openControlSocket(password);
@@ -682,7 +690,11 @@ export const App = () => {
                 ? activeWindow.panes.map((pane) => (
                     <li key={pane.id}>
                       <button
-                        onClick={() => sendControl({ type: "select_pane", paneId: pane.id })}
+                        onClick={() => sendControl({
+                          type: "select_pane",
+                          paneId: pane.id,
+                          ...(stickyZoom ? { stickyZoom: true } : {})
+                        })}
                         className={pane.active ? "active" : ""}
                       >
                         %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
@@ -719,6 +731,13 @@ export const App = () => {
               disabled={!activePane || !activeWindow || activeWindow.paneCount <= 1}
             >
               Zoom Pane
+            </button>
+            <button
+              className={`drawer-section-action${stickyZoom ? " active" : ""}`}
+              onClick={() => setStickyZoom((v) => !v)}
+              data-testid="sticky-zoom-toggle"
+            >
+              Sticky Zoom: {stickyZoom ? "On" : "Off"}
             </button>
 
             <button

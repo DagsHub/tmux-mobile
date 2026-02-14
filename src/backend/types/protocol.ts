@@ -5,7 +5,7 @@ export type ControlClientMessage =
   | { type: "new_window"; session: string }
   | { type: "select_window"; session: string; windowIndex: number }
   | { type: "kill_window"; session: string; windowIndex: number }
-  | { type: "select_pane"; paneId: string }
+  | { type: "select_pane"; paneId: string; stickyZoom?: boolean }
   | { type: "split_pane"; paneId: string; orientation: "h" | "v" }
   | { type: "kill_pane"; paneId: string }
   | { type: "zoom_pane"; paneId: string }
