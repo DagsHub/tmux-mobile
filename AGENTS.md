@@ -21,6 +21,18 @@ npm run test:smoke       # Smoke test against real tmux (requires tmux installed
 npm run test:e2e         # Build + run Playwright e2e tests
 ```
 
+## Git Workflow (Default)
+
+- By default, do feature development in a dedicated git worktree, not in the primary checkout.
+- Keep the primary checkout on `main` for syncing, quick verification, and creating new worktrees.
+- Only work directly in the primary checkout when explicitly requested.
+- Feature worktrees should be created/rebased from the latest `origin/main` unless explicitly instructed otherwise.
+
+### Naming convention
+
+- Branch: `feat/issue-<number>-<short-kebab-scope>`
+- Worktree path: `.worktrees/issue-<number>-<short-kebab-scope>`
+
 ## Architecture
 
 ### Two-process dev setup
