@@ -81,7 +81,7 @@ export const createTmuxMobileServer = (
   });
 
   app.use(express.static(config.frontendDir));
-  app.get("*", (req, res) => {
+  app.get("*path", (req, res) => {
     if (req.path.startsWith("/ws/")) {
       res.status(404).end();
       return;
