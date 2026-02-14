@@ -61,6 +61,9 @@ npm run test:e2e         # Build + run Playwright e2e tests
 - Tmux state types: `TmuxStateSnapshot` > `TmuxSessionState` > `TmuxWindowState` > `TmuxPaneState`
 
 ### Testing
+
+NON TRIVIAL CHANGES SHOULD BE DONE WITH TDD - first write tests, then see then red, then implement, then green.
+
 - **tests/harness/** — `FakeTmuxGateway` and `FakePtyFactory` for unit/integration tests (in-memory, no real tmux)
 - **tests/backend/** — Unit tests for parser, state monitor, terminal runtime, env utils
 - **tests/integration/** — Server integration tests using supertest + real WebSocket clients against `createTmuxMobileServer` with fakes
