@@ -1,7 +1,18 @@
 import { expect, test } from '@playwright/test';
+import { startE2EServer, type StartedE2EServer } from './harness/test-server.js';
+
+let server: StartedE2EServer;
+
+test.beforeAll(async () => {
+  server = await startE2EServer({ sessions: ['main'], defaultSession: 'main' });
+});
+
+test.afterAll(async () => {
+  await server.stop();
+});
 
 test('toolbar layout: unified rows with balanced button distribution', async ({ page }) => {
-  await page.goto('http://localhost:5173');
+  await page.goto(`${server.baseUrl}/?token=${server.token}`);
 
   const mainRows = await page.locator('.toolbar-main').all();
   expect(mainRows.length).toBe(2);
