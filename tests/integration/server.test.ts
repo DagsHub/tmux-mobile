@@ -18,7 +18,9 @@ const buildConfig = (token: string): RuntimeConfig => ({
   scrollbackLines: 1000,
   pollIntervalMs: 100,
   token,
-  frontendDir: process.cwd()
+  frontendDir: process.cwd(),
+  approvalEnabled: false,
+  jwtLifetimeSecs: 86400
 });
 
 describe("tmux mobile server", () => {

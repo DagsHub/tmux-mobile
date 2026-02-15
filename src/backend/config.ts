@@ -8,6 +8,8 @@ export interface RuntimeConfig {
   pollIntervalMs: number;
   token: string;
   frontendDir: string;
+  approvalEnabled: boolean;
+  jwtLifetimeSecs: number;
 }
 
 export interface CliArgs {
@@ -18,4 +20,6 @@ export interface CliArgs {
   session: string;
   scrollback: number;
   debugLog?: string;
+  noApprove: boolean;
+  jwtLifetime: number;
 }
