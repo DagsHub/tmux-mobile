@@ -236,6 +236,16 @@ export const createTmuxMobileServer = (
       case "swap_window":
         await deps.tmux.swapWindow(message.session, message.srcIndex, message.dstIndex);
         return;
+      case "set_session_default_directory":
+        await deps.tmux.setSessionDefaultDirectory(message.session, message.directory ?? null);
+        return;
+      case "set_window_default_directory":
+        await deps.tmux.setWindowDefaultDirectory(
+          message.session,
+          message.windowIndex,
+          message.directory ?? null
+        );
+        return;
       case "auth":
         return;
       default: {

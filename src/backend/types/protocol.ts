@@ -16,7 +16,9 @@ export type ControlClientMessage =
   | { type: "kill_session"; session: string }
   | { type: "respawn_pane"; paneId: string }
   | { type: "break_pane"; paneId: string }
-  | { type: "swap_window"; session: string; srcIndex: number; dstIndex: number };
+  | { type: "swap_window"; session: string; srcIndex: number; dstIndex: number }
+  | { type: "set_session_default_directory"; session: string; directory?: string }
+  | { type: "set_window_default_directory"; session: string; windowIndex: number; directory?: string };
 
 export interface TmuxSessionSummary {
   name: string;

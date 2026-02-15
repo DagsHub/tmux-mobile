@@ -9,6 +9,8 @@ const execFileAsync = promisify(execFile);
 const SESSION_FMT = "#{session_name}\t#{session_attached}\t#{session_windows}";
 const WINDOW_FMT = "#{window_index}\t#{window_name}\t#{window_active}\t#{window_panes}";
 const PANE_FMT = "#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_active}\t#{pane_width}x#{pane_height}";
+const SESSION_DEFAULT_DIRECTORY_OPTION = "@tmux_mobile_session_default_directory";
+const WINDOW_DEFAULT_DIRECTORY_OPTION = "@tmux_mobile_window_default_directory";
 
 interface TmuxCliExecutorOptions {
   socketName?: string;
@@ -77,6 +79,23 @@ export class TmuxCliExecutor implements TmuxGateway {
     }
   }
 
+  private async showOption(args: string[]): Promise<string | null> {
+    try {
+      const value = await this.runTmux(["show-options", "-qv", ...args]);
+      return value === "" ? null : value;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getSessionDefaultDirectory(session: string): Promise<string | null> {
+    return this.showOption(["-t", session, SESSION_DEFAULT_DIRECTORY_OPTION]);
+  }
+
+  private async getWindowDefaultDirectory(windowId: string): Promise<string | null> {
+    return this.showOption(["-w", "-t", windowId, WINDOW_DEFAULT_DIRECTORY_OPTION]);
+  }
+
   public async listSessions() {
     const output = await this.runTmuxMaybeNoServer(["list-sessions", "-F", SESSION_FMT]);
     if (!output) {
@@ -120,7 +139,12 @@ export class TmuxCliExecutor implements TmuxGateway {
   }
 
   public async newWindow(session: string): Promise<void> {
-    await this.runTmux(["new-window", "-t", session]);
+    const defaultDirectory = await this.getSessionDefaultDirectory(session);
+    const args = ["new-window", "-t", session];
+    if (defaultDirectory) {
+      args.push("-c", defaultDirectory);
+    }
+    await this.runTmux(args);
   }
 
   public async killWindow(session: string, windowIndex: number): Promise<void> {
@@ -132,7 +156,20 @@ export class TmuxCliExecutor implements TmuxGateway {
   }
 
   public async splitWindow(paneId: string, orientation: "h" | "v"): Promise<void> {
-    await this.runTmux(["split-window", `-${orientation}`, "-t", paneId]);
+    const [windowId, sessionName] = await Promise.all([
+      this.runTmux(["display-message", "-p", "-t", paneId, "#{window_id}"]),
+      this.runTmux(["display-message", "-p", "-t", paneId, "#{session_name}"])
+    ]);
+    const windowDirectory = await this.getWindowDefaultDirectory(windowId);
+    const sessionDirectory = await this.getSessionDefaultDirectory(sessionName);
+    const defaultDirectory = windowDirectory ?? sessionDirectory;
+
+    const args = ["split-window", `-${orientation}`];
+    if (defaultDirectory) {
+      args.push("-c", defaultDirectory);
+    }
+    args.push("-t", paneId);
+    await this.runTmux(args);
   }
 
   public async killPane(paneId: string): Promise<void> {
@@ -169,5 +206,57 @@ export class TmuxCliExecutor implements TmuxGateway {
 
   public async swapWindow(session: string, srcIndex: number, dstIndex: number): Promise<void> {
     await this.runTmux(["swap-window", "-s", `${session}:${srcIndex}`, "-t", `${session}:${dstIndex}`]);
+  }
+
+  public async setSessionDefaultDirectory(
+    session: string,
+    directory: string | null
+  ): Promise<void> {
+    if (!directory) {
+      await this.runTmux([
+        "set-option",
+        "-u",
+        "-t",
+        session,
+        SESSION_DEFAULT_DIRECTORY_OPTION
+      ]);
+      return;
+    }
+
+    await this.runTmux([
+      "set-option",
+      "-t",
+      session,
+      SESSION_DEFAULT_DIRECTORY_OPTION,
+      directory
+    ]);
+  }
+
+  public async setWindowDefaultDirectory(
+    session: string,
+    windowIndex: number,
+    directory: string | null
+  ): Promise<void> {
+    const target = `${session}:${windowIndex}`;
+    if (!directory) {
+      await this.runTmux([
+        "set-option",
+        "-u",
+        "-w",
+        "-t",
+        target,
+        WINDOW_DEFAULT_DIRECTORY_OPTION
+      ]);
+      return;
+    }
+
+    await this.runTmux([
+      "set-option",
+      "-w",
+      "-t",
+      target,
+      WINDOW_DEFAULT_DIRECTORY_OPTION,
+      directory
+    ]);
   }
 }
