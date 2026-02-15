@@ -9,7 +9,7 @@ describe("file logger", () => {
     vi.restoreAllMocks();
   });
 
-  test("is silent when no debug log file is configured", () => {
+  test("keeps debug logs silent but preserves error output when no debug log file is configured", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const logger = createLogger(undefined);
@@ -18,7 +18,8 @@ describe("file logger", () => {
     logger.error("error");
 
     expect(logSpy).not.toHaveBeenCalled();
-    expect(errorSpy).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("error");
   });
 
   test("writes logs to file when debug log file is configured", () => {

@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const NOOP_LOGGER: Pick<Console, "log" | "error"> = {
+const DEFAULT_LOGGER: Pick<Console, "log" | "error"> = {
   log: () => undefined,
-  error: () => undefined
+  error: (...values: unknown[]) => {
+    console.error(...values);
+  }
 };
 
 const serialize = (value: unknown): string => {
@@ -24,7 +26,7 @@ export const createLogger = (
   logFilePath: string | undefined
 ): Pick<Console, "log" | "error"> => {
   if (!logFilePath) {
-    return NOOP_LOGGER;
+    return DEFAULT_LOGGER;
   }
 
   const resolvedPath = path.resolve(logFilePath);
