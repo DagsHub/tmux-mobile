@@ -10,7 +10,7 @@ const DEFAULT_LOGGER: Pick<Console, "log" | "error"> = {
 
 const serialize = (value: unknown): string => {
   if (value instanceof Error) {
-    return `${value.name}: ${value.message}`;
+    return value.stack ?? `${value.name}: ${value.message}`;
   }
   if (typeof value === "string") {
     return value;

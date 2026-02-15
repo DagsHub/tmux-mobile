@@ -34,4 +34,18 @@ describe("file logger", () => {
     expect(content).toContain("[INFO] hello {\"ok\":true}");
     expect(content).toContain("[ERROR] boom");
   });
+
+  test("writes error stack trace details to debug log files", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tmux-mobile-logger-"));
+    const logPath = path.join(tempRoot, "debug.log");
+    const logger = createLogger(logPath);
+    const error = new Error("explode");
+
+    error.stack = "Error: explode\n    at test-frame";
+    logger.error(error);
+
+    const content = fs.readFileSync(logPath, "utf8");
+    expect(content).toContain("Error: explode");
+    expect(content).toContain("at test-frame");
+  });
 });
