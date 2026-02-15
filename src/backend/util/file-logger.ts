@@ -1,9 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
+const DEFAULT_LOGGER: Pick<Console, "log" | "error"> = {
+  log: () => undefined,
+  error: (...values: unknown[]) => {
+    console.error(...values);
+  }
+};
+
 const serialize = (value: unknown): string => {
   if (value instanceof Error) {
-    return `${value.name}: ${value.message}`;
+    return value.stack ?? `${value.name}: ${value.message}`;
   }
   if (typeof value === "string") {
     return value;
@@ -19,7 +26,7 @@ export const createLogger = (
   logFilePath: string | undefined
 ): Pick<Console, "log" | "error"> => {
   if (!logFilePath) {
-    return console;
+    return DEFAULT_LOGGER;
   }
 
   const resolvedPath = path.resolve(logFilePath);
