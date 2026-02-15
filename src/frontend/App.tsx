@@ -659,6 +659,22 @@ export const App = () => {
                         }}>Rename</button>
                         <button onClick={() => {
                           setOpenMenu(null);
+                          const directory = window.prompt(
+                            "Default directory for new panes in this session (leave blank to clear)",
+                            ""
+                          );
+                          if (directory === null) {
+                            return;
+                          }
+                          const normalizedDirectory = directory.trim();
+                          sendControl({
+                            type: "set_session_default_directory",
+                            session: session.name,
+                            directory: normalizedDirectory || undefined
+                          });
+                        }}>Set Default Directory</button>
+                        <button onClick={() => {
+                          setOpenMenu(null);
                           sendControl({ type: "new_window", session: session.name });
                         }}>New Window</button>
                         <button className="destructive" onClick={() => {
@@ -720,6 +736,23 @@ export const App = () => {
                                 sendControl({ type: "rename_window", session: activeSession.name, windowIndex: windowState.index, newName });
                               }
                             }}>Rename</button>
+                            <button onClick={() => {
+                              setOpenMenu(null);
+                              const directory = window.prompt(
+                                "Default directory for new panes in this window (leave blank to clear)",
+                                ""
+                              );
+                              if (directory === null) {
+                                return;
+                              }
+                              const normalizedDirectory = directory.trim();
+                              sendControl({
+                                type: "set_window_default_directory",
+                                session: activeSession.name,
+                                windowIndex: windowState.index,
+                                directory: normalizedDirectory || undefined
+                              });
+                            }}>Set Default Directory</button>
                             <button onClick={() => {
                               setOpenMenu(null);
                               sendControl({ type: "split_pane", paneId: windowState.panes[0]?.id ?? "", orientation: "h" });

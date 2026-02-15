@@ -182,6 +182,57 @@ describe("tmux mobile server", () => {
     control.close();
   });
 
+  test("applies session and window default directories for new panes", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+
+    await waitForMessage(control, (msg: { type: string }) => msg.type === "attached");
+    const snapshot = await buildSnapshot(tmux);
+    const paneId = snapshot.sessions[0].windowStates[0].panes[0].id;
+
+    control.send(
+      JSON.stringify({
+        type: "set_session_default_directory",
+        session: "main",
+        directory: "/tmp/session-default"
+      })
+    );
+    control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
+
+    control.send(
+      JSON.stringify({
+        type: "set_window_default_directory",
+        session: "main",
+        windowIndex: 0,
+        directory: "/tmp/window-default"
+      })
+    );
+    control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "v" }));
+
+    control.send(
+      JSON.stringify({
+        type: "set_window_default_directory",
+        session: "main",
+        windowIndex: 0
+      })
+    );
+    control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(tmux.calls).toContain("setSessionDefaultDirectory:main:/tmp/session-default");
+    expect(tmux.calls).toContain("setWindowDefaultDirectory:main:0:/tmp/window-default");
+    expect(tmux.calls).toContain("setWindowDefaultDirectory:main:0:<unset>");
+    expect(tmux.calls).toContain(`splitWindow:${paneId}:h:/tmp/session-default`);
+    expect(tmux.calls).toContain(`splitWindow:${paneId}:v:/tmp/window-default`);
+    expect(tmux.calls.filter((call) => call === `splitWindow:${paneId}:h:/tmp/session-default`)).toHaveLength(2);
+
+    control.close();
+  });
+
   test("stop is idempotent when called repeatedly", async () => {
     await runningServer.stop();
     await runningServer.stop();
