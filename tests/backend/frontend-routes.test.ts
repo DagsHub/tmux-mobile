@@ -1,5 +1,8 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 import { AuthService } from "../../src/backend/auth/auth-service.js";
 import type { RuntimeConfig } from "../../src/backend/config.js";
 import { createTmuxMobileServer, type RunningServer } from "../../src/backend/server.js";
@@ -21,6 +24,15 @@ const buildConfig = (frontendDir: string): RuntimeConfig => ({
 describe("frontend route handling", () => {
   let runningServer: RunningServer | undefined;
   let baseUrl: string;
+
+  const createFrontendFixture = async (): Promise<string> => {
+    const frontendDir = await mkdtemp(path.join(tmpdir(), "tmux-mobile-frontend-"));
+    await writeFile(
+      path.join(frontendDir, "index.html"),
+      "<!doctype html><html><body><div id=\"app\">fixture-index</div></body></html>"
+    );
+    return frontendDir;
+  };
 
   const startServer = async (frontendDir: string): Promise<void> => {
     const tmux = new FakeTmuxGateway([]);
@@ -77,18 +89,30 @@ describe("frontend route handling", () => {
     expect(response.headers.get("content-type")).toContain("application/json");
   });
 
-  test("non-WebSocket SPA routes attempt to serve index.html", async () => {
-    await startServer(process.cwd());
-    // These will return 500 if index.html doesn't exist, which is expected
-    // The important thing is they don't return 404 like WebSocket paths
-    const response = await fetch(`${baseUrl}/session/main`);
-    expect(response.status).not.toBe(404);
+  test("non-WebSocket SPA routes serve index.html", async () => {
+    const frontendDir = await createFrontendFixture();
+    try {
+      await startServer(frontendDir);
+      const response = await fetch(`${baseUrl}/session/main`);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toContain("fixture-index");
+    } finally {
+      await rm(frontendDir, { recursive: true, force: true });
+    }
   });
 
-  test("root path attempts to serve index.html", async () => {
-    await startServer(process.cwd());
-    const response = await fetch(`${baseUrl}/`);
-    expect(response.status).not.toBe(404);
+  test("root path serves index.html", async () => {
+    const frontendDir = await createFrontendFixture();
+    try {
+      await startServer(frontendDir);
+      const response = await fetch(`${baseUrl}/`);
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toContain("fixture-index");
+    } finally {
+      await rm(frontendDir, { recursive: true, force: true });
+    }
   });
 
   test("fallback route handles missing frontend gracefully", async () => {

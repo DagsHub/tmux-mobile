@@ -1,5 +1,5 @@
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { AuthService } from "../../src/backend/auth/auth-service.js";
 import type { RuntimeConfig } from "../../src/backend/config.js";
 import { createTmuxMobileServer, type RunningServer } from "../../src/backend/server.js";
