@@ -39,7 +39,7 @@ jobs:
         run: npx playwright test tests/e2e/screenshot.spec.ts
 
       - name: Upload screenshots as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: ui-screenshots
