@@ -5,5 +5,6 @@ coverage
 *.log
 test-results
 playwright-report
+screenshots
 .playwright-mcp/
 .worktrees/

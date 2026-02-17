@@ -1,0 +1,103 @@
+name: PR Screenshots
+
+on:
+  pull_request:
+    paths:
+      - "src/frontend/**"
+      - "public/**"
+      - "index.html"
+      - "vite.config.*"
+      - "*.css"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Capture screenshots
+        run: npx playwright test tests/e2e/screenshot.spec.ts
+
+      - name: Upload screenshots as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: screenshots/
+          retention-days: 30
+
+      - name: Post screenshots to PR
+        if: >
+          always() &&
+          hashFiles('screenshots/*.png') != '' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const screenshotsDir = 'screenshots';
+            if (!fs.existsSync(screenshotsDir)) return;
+
+            const files = fs.readdirSync(screenshotsDir).filter(f => f.endsWith('.png'));
+            if (files.length === 0) return;
+
+            const marker = '<!-- pr-screenshots-bot -->';
+            const body = [
+              marker,
+              '## UI Screenshots',
+              '',
+              `> Auto-captured from commit ${context.sha.slice(0, 7)}`,
+              '',
+              `Screenshots are available as a [build artifact](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`,
+              '',
+              `**Files captured:** ${files.join(', ')}`,
+              '',
+              '_Download the `ui-screenshots` artifact from the Actions run to view full-resolution images._'
+            ].join('\n');
+
+            // Find existing bot comment to update instead of spamming
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }
