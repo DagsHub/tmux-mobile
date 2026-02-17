@@ -15,6 +15,7 @@ interface WindowNode {
   index: number;
   name: string;
   active: boolean;
+  zoomed: boolean;
   panes: PaneNode[];
 }
 
@@ -42,6 +43,7 @@ const buildDefaultSession = (name: string): SessionNode => ({
       index: 0,
       name: "shell",
       active: true,
+      zoomed: false,
       panes: [
         {
           index: 0,
@@ -103,7 +105,8 @@ export class FakeTmuxGateway implements TmuxGateway {
         currentCommand: pane.command,
         active: pane.active,
         width: pane.width,
-        height: pane.height
+        height: pane.height,
+        zoomed: window.zoomed
       }))
     );
   }
@@ -140,6 +143,7 @@ export class FakeTmuxGateway implements TmuxGateway {
       index: nextIndex + 1,
       name: `win-${nextIndex + 1}`,
       active: true,
+      zoomed: false,
       panes: [
         {
           index: 0,
@@ -176,6 +180,7 @@ export class FakeTmuxGateway implements TmuxGateway {
     for (const pane of window.panes) {
       pane.active = false;
     }
+    window.zoomed = false;
     window.panes.push({
       index: window.panes.length,
       id: `%${paneCounter++}`,
@@ -208,6 +213,11 @@ export class FakeTmuxGateway implements TmuxGateway {
 
   public async zoomPane(paneId: string): Promise<void> {
     this.calls.push(`zoomPane:${paneId}`);
+    const { window } = this.findByPane(paneId);
+    for (const pane of window.panes) {
+      pane.active = pane.id === paneId;
+    }
+    window.zoomed = !window.zoomed;
   }
 
   public async capturePane(paneId: string, lines: number): Promise<string> {

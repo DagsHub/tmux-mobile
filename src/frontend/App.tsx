@@ -32,6 +32,17 @@ const getPreferredTerminalFontSize = (): number => {
   return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches ? 12 : 14;
 };
 
+const getInitialStickyZoom = (): boolean => {
+  const stored = localStorage.getItem("tmux-mobile-sticky-zoom");
+  if (stored === "true") {
+    return true;
+  }
+  if (stored === "false") {
+    return false;
+  }
+  return window.matchMedia("(max-width: 768px)").matches;
+};
+
 const parseMessage = (raw: string): ControlServerMessage | null => {
   try {
     return JSON.parse(raw) as ControlServerMessage;
@@ -79,9 +90,7 @@ export const App = () => {
     localStorage.getItem("tmux-mobile-toolbar-expanded") === "true"
   );
   const [toolbarDeepExpanded, setToolbarDeepExpanded] = useState(false);
-  const [stickyZoom, setStickyZoom] = useState(
-    localStorage.getItem("tmux-mobile-sticky-zoom") === "true"
-  );
+  const [stickyZoom, setStickyZoom] = useState(getInitialStickyZoom);
 
   const activeSession: TmuxSessionState | undefined = useMemo(() => {
     const selected = snapshot.sessions.find((session) => session.name === attachedSession);
@@ -491,6 +500,14 @@ export const App = () => {
             aria-label={`Status: ${topStatus.label}`}
             data-testid="top-status-indicator"
           />
+          <span
+            className={`top-zoom-indicator${activePane?.zoomed ? " on" : ""}`}
+            title={activePane?.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
+            aria-label={`Pane zoom: ${activePane?.zoomed ? "on" : "off"}`}
+            data-testid="top-zoom-indicator"
+          >
+            ⛶
+          </span>
           <button className="top-btn" onClick={() => requestScrollback(serverConfig?.scrollbackLines ?? 1000)}>
             Scroll
           </button>
@@ -698,6 +715,16 @@ export const App = () => {
                         className={pane.active ? "active" : ""}
                       >
                         %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
+                        {pane.active ? (
+                          <span
+                            className={`pane-zoom-indicator${pane.zoomed ? " on" : ""}`}
+                            title={pane.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
+                            aria-label={`Pane zoom: ${pane.zoomed ? "on" : "off"}`}
+                            data-testid="active-pane-zoom-indicator"
+                          >
+                            ⛶
+                          </span>
+                        ) : null}
                       </button>
                     </li>
                   ))

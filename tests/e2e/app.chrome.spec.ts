@@ -182,7 +182,7 @@ test.describe("tmux-mobile browser behavior", () => {
       await server.stop();
     });
 
-    test("toggling sticky zoom persists state and sends stickyZoom on pane select", async ({ page }) => {
+    test("defaults off on wide screens and toggles sticky zoom state", async ({ page }) => {
       await page.goto(`${server.baseUrl}/?token=${server.token}`);
       await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
 
@@ -206,6 +206,19 @@ test.describe("tmux-mobile browser behavior", () => {
       await expect(toggle).not.toHaveClass(/active/);
     });
 
+    test("defaults on for narrow screens when no sticky zoom preference is stored", async ({ page }) => {
+      await page.addInitScript(() => {
+        localStorage.removeItem("tmux-mobile-sticky-zoom");
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.getByTestId("sticky-zoom-toggle")).toContainText("Sticky Zoom: On");
+      await expect(page.getByTestId("sticky-zoom-toggle")).toHaveClass(/active/);
+    });
+
     test("sticky zoom state persists across page reloads", async ({ page }) => {
       // Set sticky zoom on via localStorage
       await page.addInitScript(() => {
@@ -218,6 +231,37 @@ test.describe("tmux-mobile browser behavior", () => {
       // Open drawer and verify sticky zoom is on
       await page.getByTestId("drawer-toggle").click();
       await expect(page.getByTestId("sticky-zoom-toggle")).toContainText("Sticky Zoom: On");
+    });
+
+    test("shows zoom indicators for active pane in drawer and top bar", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+      await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
+
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+      await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
+        "aria-label",
+        "Pane zoom: off"
+      );
+
+      await page.getByRole("button", { name: "Split H" }).click();
+      const zoomButton = page.getByRole("button", { name: "Zoom Pane" });
+      await expect(zoomButton).toBeEnabled();
+
+      await zoomButton.click();
+      await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: on");
+      await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
+        "aria-label",
+        "Pane zoom: on"
+      );
+
+      await zoomButton.click();
+      await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
+      await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
+        "aria-label",
+        "Pane zoom: off"
+      );
     });
   });
 

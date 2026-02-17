@@ -11,6 +11,7 @@ export interface TmuxPaneState {
   active: boolean;
   width: number;
   height: number;
+  zoomed: boolean;
 }
 
 export interface TmuxWindowState {
