@@ -222,9 +222,10 @@ describe("approval flow integration", () => {
 
     control2.send(JSON.stringify({ type: "auth", token: "test-token", jwt }));
 
-    // Should get auth_ok (not auth_pending, not auth_approved)
-    const reconnected = await waitFor2((msg) => msg.type === "auth_ok") as { type: string; clientId?: string };
+    // Should get auth_approved with a fresh JWT (not auth_pending)
+    const reconnected = await waitFor2((msg) => msg.type === "auth_approved") as { type: string; jwt?: string; clientId?: string };
     expect(reconnected.clientId).toBeTruthy();
+    expect(reconnected.jwt).toBeTruthy();
 
     // Should also attach to session
     const attached = await waitFor2((msg) => msg.type === "attached") as { type: string; session: string };

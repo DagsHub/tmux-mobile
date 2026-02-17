@@ -34,6 +34,7 @@ interface DataContext {
   authed: boolean;
   controlClientId?: string;
   controlContext?: ControlContext;
+  authInProgress: boolean;
 }
 
 export interface ServerDependencies {
@@ -383,7 +384,8 @@ export const createTmuxMobileServer = (
             const jwtResult = await approvalService.verifyJwt(message.jwt);
             if (jwtResult.valid) {
               logger.log("control ws jwt auth ok", context.clientId);
-              await completeAuth(context);
+              const freshJwt = await approvalService.signJwt(context.clientId);
+              await completeAuth(context, freshJwt);
               return;
             }
             logger.log("control ws jwt invalid", context.clientId, jwtResult.reason);
@@ -462,13 +464,18 @@ export const createTmuxMobileServer = (
     });
   });
 
-  terminalWss.on("connection", (socket) => {
-    const ctx: DataContext = { socket, authed: false };
+  terminalWss.on("connection", (socket, request) => {
+    const ctx: DataContext = { socket, authed: false, authInProgress: false };
     terminalClients.add(ctx);
     logger.log("terminal ws connected");
 
     socket.on("message", async (rawData, isBinary) => {
       if (!ctx.authed) {
+        // Ignore messages while async auth (JWT verification) is in progress
+        if (ctx.authInProgress) {
+          return;
+        }
+
         if (isBinary) {
           socket.close(4001, "auth required");
           return;
@@ -487,7 +494,9 @@ export const createTmuxMobileServer = (
 
         // JWT verification path for terminal WS
         if (authMessage.jwt && approvalService) {
+          ctx.authInProgress = true;
           const jwtResult = await approvalService.verifyJwt(authMessage.jwt);
+          ctx.authInProgress = false;
           if (jwtResult.valid) {
             ctx.authed = true;
             logger.log("terminal ws jwt auth ok");
