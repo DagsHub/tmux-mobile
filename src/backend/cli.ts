@@ -80,8 +80,7 @@ const printConnectionInfo = (
   password?: string,
   isDevMode: boolean = false
 ): void => {
-  const frontendPort = isDevMode ? 5173 : 8767;
-  const frontendUrl = `http://localhost:${frontendPort}`;
+  const frontendUrl = isDevMode ? `http://localhost:5173` : localUrl;
   const localWithToken = buildLaunchUrl(frontendUrl, token);
 
   console.log("\n═══════════════════════════════════════");
