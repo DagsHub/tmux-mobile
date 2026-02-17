@@ -624,9 +624,9 @@ button.danger {
   min-width: 0;
 }
 
-.kebab-btn {
-  width: 2.2rem;
-  min-height: 2.2rem;
+.drawer .kebab-btn {
+  width: 2rem;
+  min-height: 2rem;
   text-align: center;
   font-size: 1.1rem;
   flex-shrink: 0;
@@ -634,6 +634,23 @@ button.danger {
   justify-content: center;
   align-items: center;
   padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+  opacity: 0.4;
+  border-radius: 6px;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.drawer .kebab-btn:hover,
+.drawer .kebab-btn:focus-visible {
+  background: var(--btn-bg);
+  border-color: var(--btn-border);
+  opacity: 1;
+}
+
+li:has(.kebab-dropdown) .kebab-btn {
+  opacity: 1;
 }
 
 .kebab-dropdown {
