@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Symbols Nerd Font Mono";
+  src: url("/fonts/SymbolsNerdFontMono-Regular.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Backgrounds */
   --bg-shell: linear-gradient(160deg, #111827 0%, #0b1224 55%, #0f172a 100%);
