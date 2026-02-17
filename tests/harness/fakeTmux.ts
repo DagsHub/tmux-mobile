@@ -59,6 +59,8 @@ const buildDefaultSession = (name: string): SessionNode => ({
 export class FakeTmuxGateway implements TmuxGateway {
   private sessions: SessionNode[] = [];
   private failSwitchClient = false;
+  private readonly sessionDefaultDirectories = new Map<string, string>();
+  private readonly windowDefaultDirectories = new Map<string, string>();
   public readonly calls: string[] = [];
 
   public constructor(seedSessions: string[] = [], options: FakeTmuxOptions = {}) {
@@ -136,6 +138,7 @@ export class FakeTmuxGateway implements TmuxGateway {
       window.active = false;
     }
     const nextIndex = session.windows.at(-1)?.index ?? -1;
+    const defaultDirectory = this.sessionDefaultDirectories.get(sessionName);
     session.windows.push({
       index: nextIndex + 1,
       name: `win-${nextIndex + 1}`,
@@ -144,7 +147,7 @@ export class FakeTmuxGateway implements TmuxGateway {
         {
           index: 0,
           id: `%${paneCounter++}`,
-          command: "bash",
+          command: defaultDirectory ? `bash@${defaultDirectory}` : "bash",
           active: true,
           width: 120,
           height: 40
@@ -171,15 +174,22 @@ export class FakeTmuxGateway implements TmuxGateway {
   }
 
   public async splitWindow(paneId: string, orientation: "h" | "v"): Promise<void> {
-    this.calls.push(`splitWindow:${paneId}:${orientation}`);
     const { session, window } = this.findByPane(paneId);
+    const windowKey = `${session.name}:${window.index}`;
+    const defaultDirectory =
+      this.windowDefaultDirectories.get(windowKey) ?? this.sessionDefaultDirectories.get(session.name);
+    this.calls.push(
+      defaultDirectory
+        ? `splitWindow:${paneId}:${orientation}:${defaultDirectory}`
+        : `splitWindow:${paneId}:${orientation}`
+    );
     for (const pane of window.panes) {
       pane.active = false;
     }
     window.panes.push({
       index: window.panes.length,
       id: `%${paneCounter++}`,
-      command: "bash",
+      command: defaultDirectory ? `bash@${defaultDirectory}` : "bash",
       active: true,
       width: orientation === "h" ? 60 : 120,
       height: orientation === "v" ? 20 : 40
@@ -213,6 +223,36 @@ export class FakeTmuxGateway implements TmuxGateway {
   public async capturePane(paneId: string, lines: number): Promise<string> {
     this.calls.push(`capturePane:${paneId}:${lines}`);
     return `captured ${lines} lines for ${paneId}`;
+  }
+
+  public async setSessionDefaultDirectory(
+    session: string,
+    directory: string | null
+  ): Promise<void> {
+    this.calls.push(
+      `setSessionDefaultDirectory:${session}:${directory ?? "<unset>"}`
+    );
+    if (!directory) {
+      this.sessionDefaultDirectories.delete(session);
+      return;
+    }
+    this.sessionDefaultDirectories.set(session, directory);
+  }
+
+  public async setWindowDefaultDirectory(
+    session: string,
+    windowIndex: number,
+    directory: string | null
+  ): Promise<void> {
+    const key = `${session}:${windowIndex}`;
+    this.calls.push(
+      `setWindowDefaultDirectory:${session}:${windowIndex}:${directory ?? "<unset>"}`
+    );
+    if (!directory) {
+      this.windowDefaultDirectories.delete(key);
+      return;
+    }
+    this.windowDefaultDirectories.set(key, directory);
   }
 
   public setFailSwitchClient(value: boolean): void {

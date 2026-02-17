@@ -613,11 +613,79 @@ button.danger {
   border-color: var(--border-active);
 }
 
-.drawer-grid {
+.drawer-item {
+  display: flex;
+  gap: 0.3rem;
+  align-items: stretch;
+}
+
+.drawer-item > button:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.drawer .kebab-btn {
+  width: 2rem;
+  min-height: 2rem;
+  text-align: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+  opacity: 0.4;
+  border-radius: 6px;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.drawer .kebab-btn:hover,
+.drawer .kebab-btn:focus-visible {
+  background: var(--btn-bg);
+  border-color: var(--btn-border);
+  opacity: 1;
+}
+
+li:has(.kebab-dropdown) .kebab-btn {
+  opacity: 1;
+}
+
+.kebab-dropdown {
+  padding: 0.25rem 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem;
+}
+
+.kebab-dropdown button {
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+}
+
+.kebab-dropdown button.destructive {
+  color: var(--danger-border);
+}
+
+.confirm-card {
+  width: min(85vw, 22rem);
+}
+
+.confirm-card p {
+  margin: 0.2rem 0;
+}
+
+.confirm-actions {
+  display: flex;
   gap: 0.5rem;
-  margin: 0.6rem 0;
+  justify-content: flex-end;
+}
+
+.confirm-actions button.destructive {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
 }
 
 .theme-picker {
