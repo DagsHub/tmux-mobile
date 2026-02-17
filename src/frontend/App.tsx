@@ -59,6 +59,8 @@ export const App = () => {
   // Approval flow state
   const [pendingApproval, setPendingApproval] = useState(false);
   const [challengeCode, setChallengeCode] = useState("");
+  // JWT is stored in localStorage (accessible to JS on the page). This is acceptable here
+  // because the app is a single-origin terminal client with no third-party scripts.
   const jwtRef = useRef<string | null>(localStorage.getItem("tmux-mobile-jwt"));
 
   const [snapshot, setSnapshot] = useState<TmuxStateSnapshot>({ sessions: [], capturedAt: "" });
