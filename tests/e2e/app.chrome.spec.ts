@@ -115,7 +115,9 @@ test.describe("tmux-mobile browser behavior", () => {
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
       await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
 
-      await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("work");
+      await expect
+        .poll(() => server.ptyFactory.lastSpawnedSession?.startsWith("tmux-mobile-client-") ?? false)
+        .toBe(true);
     });
   });
 
@@ -194,7 +196,9 @@ test.describe("tmux-mobile browser behavior", () => {
 
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
       await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
-      await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("dev");
+      await expect
+        .poll(() => server.ptyFactory.lastSpawnedSession?.startsWith("tmux-mobile-client-") ?? false)
+        .toBe(true);
     });
   });
 });

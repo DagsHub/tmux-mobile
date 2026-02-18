@@ -27,6 +27,24 @@ describe("tmux mobile server", () => {
   let ptyFactory: FakePtyFactory;
   let baseWsUrl: string;
 
+  const authControl = async (
+    control: WebSocket,
+    token: string = "test-token"
+  ): Promise<{ clientId: string; attachedSession: string }> => {
+    const authOkPromise = waitForMessage<{ type: string; clientId: string }>(
+      control,
+      (msg) => msg.type === "auth_ok"
+    );
+    const attachedPromise = waitForMessage<{ type: string; session: string }>(
+      control,
+      (msg) => msg.type === "attached"
+    );
+    control.send(JSON.stringify({ type: "auth", token }));
+    const authOk = await authOkPromise;
+    const attached = await attachedPromise;
+    return { clientId: authOk.clientId, attachedSession: attached.session };
+  };
+
   const startWithSessions = async (
     sessions: string[],
     options: { password?: string; attachedSession?: string; failSwitchClient?: boolean } = {}
@@ -73,16 +91,12 @@ describe("tmux mobile server", () => {
 
   test("creates default session and attaches when no sessions exist", async () => {
     const control = await openSocket(`${baseWsUrl}/ws/control`);
-    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    const { attachedSession } = await authControl(control);
 
-    const attached = await waitForMessage<{ type: string; session: string }>(
-      control,
-      (msg) => msg.type === "attached"
-    );
-
-    expect(attached.session).toBe("main");
+    expect(attachedSession).toMatch(/^tmux-mobile-client-/);
     expect(tmux.calls).toContain("createSession:main");
-    expect(ptyFactory.lastSpawnedSession).toBe("main");
+    expect(tmux.calls).toContain(`createGroupedSession:${attachedSession}:main`);
+    expect(ptyFactory.lastSpawnedSession).toBe(attachedSession);
 
     control.close();
   });
@@ -134,10 +148,67 @@ describe("tmux mobile server", () => {
       (msg) => msg.type === "attached"
     );
 
-    expect(attached.session).toBe("dev");
-    expect(ptyFactory.lastSpawnedSession).toBe("dev");
+    expect(attached.session).toMatch(/^tmux-mobile-client-/);
+    expect(tmux.calls).toContain(`createGroupedSession:${attached.session}:dev`);
+    expect(ptyFactory.lastSpawnedSession).toBe(attached.session);
     expect(tmux.calls.some((call) => call.startsWith("switchClient:"))).toBe(false);
     control.close();
+  });
+
+  test("requires terminal auth to bind to an authenticated control client", async () => {
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    await authControl(control);
+
+    const terminal = await openSocket(`${baseWsUrl}/ws/terminal`);
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      terminal.once("close", (code, reason) => resolve({ code, reason: reason.toString("utf8") }));
+    });
+    terminal.send(JSON.stringify({ type: "auth", token: "test-token" }));
+
+    await expect(closed).resolves.toMatchObject({ code: 4001, reason: "unauthorized" });
+    control.close();
+  });
+
+  test("isolates terminal runtime per authenticated control client", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const controlA = await openSocket(`${baseWsUrl}/ws/control`);
+    const authA = await authControl(controlA);
+    const controlB = await openSocket(`${baseWsUrl}/ws/control`);
+    const authB = await authControl(controlB);
+
+    expect(ptyFactory.processes).toHaveLength(2);
+
+    const terminalA = await openSocket(`${baseWsUrl}/ws/terminal`);
+    terminalA.send(JSON.stringify({ type: "auth", token: "test-token", clientId: authA.clientId }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const terminalB = await openSocket(`${baseWsUrl}/ws/terminal`);
+    terminalB.send(JSON.stringify({ type: "auth", token: "test-token", clientId: authB.clientId }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const fromA = new Promise<string>((resolve) => {
+      terminalA.once("message", (raw: RawData) => resolve(raw.toString("utf8")));
+    });
+    ptyFactory.processes[0].emitData("from-a");
+    await expect(fromA).resolves.toBe("from-a");
+
+    const fromB = new Promise<string>((resolve) => {
+      terminalB.once("message", (raw: RawData) => resolve(raw.toString("utf8")));
+    });
+    ptyFactory.processes[1].emitData("from-b");
+    await expect(fromB).resolves.toBe("from-b");
+
+    terminalA.send("input-a");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(ptyFactory.processes[0].writes).toContain("input-a");
+    expect(ptyFactory.processes[1].writes).not.toContain("input-a");
+
+    terminalA.close();
+    terminalB.close();
+    controlA.close();
+    controlB.close();
   });
 
   test("executes control commands and forwards terminal io", async () => {
@@ -145,11 +216,11 @@ describe("tmux mobile server", () => {
     await startWithSessions(["main"]);
 
     const control = await openSocket(`${baseWsUrl}/ws/control`);
-    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
-
-    await waitForMessage(control, (msg: { type: string }) => msg.type === "attached");
+    const { clientId, attachedSession } = await authControl(control);
     const snapshot = await buildSnapshot(tmux);
-    const paneId = snapshot.sessions[0].windowStates[0].panes[0].id;
+    const attachedState = snapshot.sessions.find((session) => session.name === attachedSession);
+    expect(attachedState).toBeDefined();
+    const paneId = attachedState?.windowStates[0].panes[0].id ?? "";
 
     control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
     control.send(JSON.stringify({ type: "send_compose", text: "echo hi" }));
@@ -165,7 +236,7 @@ describe("tmux mobile server", () => {
     expect(ptyFactory.latestProcess().writes).toContain("echo hi\r");
 
     const terminal = await openSocket(`${baseWsUrl}/ws/terminal`);
-    terminal.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    terminal.send(JSON.stringify({ type: "auth", token: "test-token", clientId }));
     await new Promise((resolve) => setTimeout(resolve, 20));
     const terminalDataPromise = new Promise<string>((resolve) => {
       terminal.once("message", (raw: RawData) => resolve(raw.toString("utf8")));
