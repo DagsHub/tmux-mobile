@@ -5,6 +5,8 @@ import type { TmuxGateway } from "../tmux/types.js";
 export class TmuxStateMonitor {
   private timer?: NodeJS.Timeout;
   private lastSerializedState?: string;
+  private nextRequestId = 0;
+  private latestHandledRequestId = 0;
 
   public constructor(
     private readonly tmux: TmuxGateway,
@@ -28,21 +30,31 @@ export class TmuxStateMonitor {
   }
 
   public async forcePublish(): Promise<void> {
-    const snapshot = await buildSnapshot(this.tmux);
-    this.lastSerializedState = JSON.stringify(snapshot.sessions);
-    this.onUpdate(snapshot);
+    await this.publishSnapshot(true);
   }
 
   private async tick(): Promise<void> {
     try {
-      const snapshot = await buildSnapshot(this.tmux);
-      const serialized = JSON.stringify(snapshot.sessions);
-      if (serialized !== this.lastSerializedState) {
-        this.lastSerializedState = serialized;
-        this.onUpdate(snapshot);
-      }
+      await this.publishSnapshot(false);
     } catch (error) {
       this.onError(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private async publishSnapshot(force: boolean): Promise<void> {
+    const requestId = ++this.nextRequestId;
+    const snapshot = await buildSnapshot(this.tmux);
+
+    // Discard stale async completions; a newer snapshot request already finished.
+    if (requestId < this.latestHandledRequestId) {
+      return;
+    }
+
+    this.latestHandledRequestId = requestId;
+    const serialized = JSON.stringify(snapshot.sessions);
+    if (force || serialized !== this.lastSerializedState) {
+      this.lastSerializedState = serialized;
+      this.onUpdate(snapshot);
     }
   }
 }
