@@ -500,14 +500,16 @@ export const App = () => {
             aria-label={`Status: ${topStatus.label}`}
             data-testid="top-status-indicator"
           />
-          <span
+          <button
             className={`top-zoom-indicator${activePane?.zoomed ? " on" : ""}`}
             title={activePane?.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
             aria-label={`Pane zoom: ${activePane?.zoomed ? "on" : "off"}`}
             data-testid="top-zoom-indicator"
+            onClick={() => activePane && sendControl({ type: "zoom_pane", paneId: activePane.id })}
+            disabled={!activePane || !activeWindow || activeWindow.paneCount <= 1}
           >
-            ⛶
-          </span>
+            🔍
+          </button>
           <button className="top-btn" onClick={() => requestScrollback(serverConfig?.scrollbackLines ?? 1000)}>
             Scroll
           </button>
@@ -717,12 +719,12 @@ export const App = () => {
                         %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
                         {pane.active ? (
                           <span
-                            className={`pane-zoom-indicator${pane.zoomed ? " on" : ""}`}
+                            className={`pane-zoom-indicator${pane.zoomed || stickyZoom ? " on" : ""}`}
                             title={pane.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
                             aria-label={`Pane zoom: ${pane.zoomed ? "on" : "off"}`}
                             data-testid="active-pane-zoom-indicator"
                           >
-                            ⛶
+                            🔍
                           </span>
                         ) : null}
                       </button>

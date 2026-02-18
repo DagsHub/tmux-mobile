@@ -414,21 +414,26 @@ input {
 }
 
 .top-zoom-indicator {
-  width: 1rem;
-  height: 1rem;
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 4px;
-  border: 1px solid var(--btn-border);
-  color: var(--text-muted);
-  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid transparent;
+  background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.top-zoom-indicator:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .top-zoom-indicator.on {
-  color: var(--accent);
   border-color: var(--border-active);
   background: var(--accent-glow);
 }
@@ -638,18 +643,16 @@ button.danger {
   align-items: center;
   justify-content: center;
   margin-left: 0.4rem;
-  width: 1rem;
-  height: 1rem;
+  width: 1.2rem;
+  height: 1.2rem;
   border-radius: 4px;
-  border: 1px solid var(--btn-border);
-  color: var(--text-muted);
-  font-size: 0.72rem;
+  border: 1px solid transparent;
+  font-size: 0.8rem;
   line-height: 1;
   vertical-align: text-bottom;
 }
 
 .pane-zoom-indicator.on {
-  color: var(--accent);
   border-color: var(--border-active);
   background: var(--accent-glow);
 }
