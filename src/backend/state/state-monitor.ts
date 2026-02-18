@@ -60,8 +60,8 @@ export class TmuxStateMonitor {
     const gen = this.forceGeneration;
     const snapshot = await buildSnapshot(this.tmux);
 
-    // A forcePublish happened while we were building; discard stale data.
-    if (!force && gen !== this.forceGeneration) {
+    // A newer forcePublish happened while we were building; discard stale data.
+    if (gen !== this.forceGeneration) {
       return;
     }
 
