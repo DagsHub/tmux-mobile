@@ -712,7 +712,7 @@ export const App = () => {
                         onClick={() => sendControl({
                           type: "select_pane",
                           paneId: pane.id,
-                          ...(stickyZoom ? { stickyZoom: true } : {})
+                          ...(stickyZoom && !pane.active ? { stickyZoom: true } : {})
                         })}
                         className={pane.active ? "active" : ""}
                       >
