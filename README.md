@@ -67,6 +67,8 @@ npm start
 - If you do not provide `--password`, a random password is generated.
 - Password is printed separately (not in URL query parameters).
 - You can disable password checks for trusted local workflows with `--no-require-password`.
+- Mobile clients attach through dedicated grouped tmux sessions, so window focus is independent per client.
+- Pane focus and process/input state are still shared when two clients work in the same window/pane.
 - Full security architecture, risk model, and operational guidance: [SECURITY.md](./SECURITY.md)
 
 ## Versioning

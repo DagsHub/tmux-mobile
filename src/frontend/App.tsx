@@ -225,12 +225,14 @@ export const App = () => {
     return reason;
   };
 
-  const openTerminalSocket = (passwordValue: string): void => {
+  const openTerminalSocket = (passwordValue: string, clientId: string): void => {
     terminalSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/terminal`);
     socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
+      socket.send(
+        JSON.stringify({ type: "auth", token, password: passwordValue || undefined, clientId })
+      );
       setStatusMessage("terminal connected");
       if (fitAddonRef.current && terminalRef.current) {
         fitAddonRef.current.fit();
@@ -281,7 +283,7 @@ export const App = () => {
           } else {
             localStorage.removeItem("tmux-mobile-password");
           }
-          openTerminalSocket(passwordValue);
+          openTerminalSocket(passwordValue, message.clientId);
           return;
         case "auth_error":
           setErrorMessage(message.reason);

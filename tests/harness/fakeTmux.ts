@@ -116,6 +116,24 @@ export class FakeTmuxGateway implements TmuxGateway {
     this.sessions.push(buildDefaultSession(name));
   }
 
+  public async createGroupedSession(name: string, targetSession: string): Promise<void> {
+    this.calls.push(`createGroupedSession:${name}:${targetSession}`);
+    if (this.sessions.some((session) => session.name === name)) {
+      return;
+    }
+    const target = this.findSession(targetSession);
+    this.sessions.push({
+      name,
+      attached: false,
+      windows: target.windows.map((window) => ({
+        index: window.index,
+        name: window.name,
+        active: window.active,
+        panes: window.panes.map((pane) => ({ ...pane }))
+      }))
+    });
+  }
+
   public async killSession(name: string): Promise<void> {
     this.calls.push(`killSession:${name}`);
     this.sessions = this.sessions.filter((session) => session.name !== name);
