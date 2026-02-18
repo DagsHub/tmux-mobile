@@ -5,8 +5,9 @@ import type { TmuxGateway } from "../tmux/types.js";
 export class TmuxStateMonitor {
   private timer?: NodeJS.Timeout;
   private lastSerializedState?: string;
-  private nextRequestId = 0;
-  private latestHandledRequestId = 0;
+  private running = false;
+  /** Bumped on every forcePublish so in-flight ticks can detect staleness. */
+  private forceGeneration = 0;
 
   public constructor(
     private readonly tmux: TmuxGateway,
@@ -16,21 +17,35 @@ export class TmuxStateMonitor {
   ) {}
 
   public async start(): Promise<void> {
-    await this.tick();
-    this.timer = setInterval(() => {
-      void this.tick();
-    }, this.pollIntervalMs);
+    this.running = true;
+    await this.publishSnapshot(false);
+    this.scheduleNextTick();
   }
 
   public stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = undefined;
-    }
+    this.running = false;
+    clearTimeout(this.timer);
+    this.timer = undefined;
   }
 
   public async forcePublish(): Promise<void> {
+    // Cancel any pending tick and bump the generation so that an in-flight
+    // tick whose buildSnapshot is still resolving will discard its result.
+    clearTimeout(this.timer);
+    this.forceGeneration++;
     await this.publishSnapshot(true);
+    this.scheduleNextTick();
+  }
+
+  private scheduleNextTick(): void {
+    if (!this.running) {
+      return;
+    }
+    this.timer = setTimeout(() => {
+      this.tick().finally(() => {
+        this.scheduleNextTick();
+      });
+    }, this.pollIntervalMs);
   }
 
   private async tick(): Promise<void> {
@@ -42,15 +57,14 @@ export class TmuxStateMonitor {
   }
 
   private async publishSnapshot(force: boolean): Promise<void> {
-    const requestId = ++this.nextRequestId;
+    const gen = this.forceGeneration;
     const snapshot = await buildSnapshot(this.tmux);
 
-    // Discard stale async completions; a newer snapshot request already finished.
-    if (requestId < this.latestHandledRequestId) {
+    // A forcePublish happened while we were building; discard stale data.
+    if (!force && gen !== this.forceGeneration) {
       return;
     }
 
-    this.latestHandledRequestId = requestId;
     const serialized = JSON.stringify(snapshot.sessions);
     if (force || serialized !== this.lastSerializedState) {
       this.lastSerializedState = serialized;
