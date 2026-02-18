@@ -233,7 +233,68 @@ test.describe("tmux-mobile browser behavior", () => {
       await expect(page.getByTestId("sticky-zoom-toggle")).toContainText("Sticky Zoom: On");
     });
 
-    test("shows zoom indicators for active pane in drawer and top bar", async ({ page }) => {
+    test("shows zoom indicators for active pane in drawer and top bar", async ({ page }, testInfo) => {
+      const collectZoomDebug = async (phase: string): Promise<void> => {
+        const topIndicator = page.getByTestId("top-zoom-indicator");
+        const activePaneIndicator = page.getByTestId("active-pane-zoom-indicator");
+        const paneButtons = page.getByRole("button", { name: /^%\d+:/ });
+
+        let tmuxPanes: unknown = null;
+        let tmuxPanesError: string | null = null;
+        try {
+          tmuxPanes = await server.tmux.listPanes("main", 0);
+        } catch (error) {
+          tmuxPanesError = error instanceof Error ? error.message : String(error);
+        }
+
+        const debug = {
+          phase,
+          topZoomIndicator: {
+            ariaLabel: await topIndicator.getAttribute("aria-label"),
+            title: await topIndicator.getAttribute("title"),
+            text: await topIndicator.textContent()
+          },
+          activePaneZoomIndicator: {
+            count: await activePaneIndicator.count(),
+            ariaLabel: await activePaneIndicator.getAttribute("aria-label"),
+            title: await activePaneIndicator.getAttribute("title"),
+            text: await activePaneIndicator.textContent()
+          },
+          paneButtons: {
+            count: await paneButtons.count(),
+            labels: await paneButtons.allTextContents()
+          },
+          zoomCalls: server.tmux.calls.filter((call) => call.startsWith("zoomPane:")),
+          recentTmuxCalls: server.tmux.calls.slice(-30),
+          tmuxPanes,
+          tmuxPanesError
+        };
+
+        const payload = JSON.stringify(debug, null, 2);
+        console.error(`[sticky-zoom-debug] ${payload}`);
+        await testInfo.attach(`sticky-zoom-${phase}`, {
+          body: payload,
+          contentType: "application/json"
+        });
+      };
+
+      const expectZoomIndicators = async (expected: "on" | "off", phase: string): Promise<void> => {
+        const expectedAriaLabel = `Pane zoom: ${expected}`;
+        try {
+          await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute(
+            "aria-label",
+            expectedAriaLabel
+          );
+          await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
+            "aria-label",
+            expectedAriaLabel
+          );
+        } catch (error) {
+          await collectZoomDebug(phase);
+          throw error;
+        }
+      };
+
       const initialPanes = await server.tmux.listPanes("main", 0);
       await server.tmux.splitWindow(initialPanes[0].id, "h");
 
@@ -256,21 +317,13 @@ test.describe("tmux-mobile browser behavior", () => {
       await expect
         .poll(() => server.tmux.calls.filter((call) => call.startsWith("zoomPane:")).length)
         .toBe(initialZoomCalls + 1);
-      await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: on");
-      await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
-        "aria-label",
-        "Pane zoom: on"
-      );
+      await expectZoomIndicators("on", "after-first-zoom");
 
       await zoomButton.click();
       await expect
         .poll(() => server.tmux.calls.filter((call) => call.startsWith("zoomPane:")).length)
         .toBe(initialZoomCalls + 2);
-      await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
-      await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
-        "aria-label",
-        "Pane zoom: off"
-      );
+      await expectZoomIndicators("off", "after-second-zoom");
     });
   });
 
