@@ -717,11 +717,11 @@ export const App = () => {
                         className={pane.active ? "active" : ""}
                       >
                         %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
-                        {pane.active ? (
+                        {pane.active && pane.zoomed ? (
                           <span
-                            className={`pane-zoom-indicator${pane.zoomed || stickyZoom ? " on" : ""}`}
-                            title={pane.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
-                            aria-label={`Pane zoom: ${pane.zoomed ? "on" : "off"}`}
+                            className="pane-zoom-indicator"
+                            title="Active pane is zoomed"
+                            aria-label="Pane zoom: on"
                             data-testid="active-pane-zoom-indicator"
                           >
                             🔍
