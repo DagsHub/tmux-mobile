@@ -498,7 +498,15 @@ export const createTmuxMobileServer = (
           const jwtResult = await approvalService.verifyJwt(authMessage.jwt);
           ctx.authInProgress = false;
           if (jwtResult.valid) {
+            const controlContext = getControlContext(clientId);
+            if (!controlContext || !controlContext.authed) {
+              socket.close(4001, "unauthorized");
+              return;
+            }
             ctx.authed = true;
+            ctx.controlClientId = clientId;
+            ctx.controlContext = controlContext;
+            controlContext.terminalClients.add(ctx);
             logger.log("terminal ws jwt auth ok");
             return;
           }
