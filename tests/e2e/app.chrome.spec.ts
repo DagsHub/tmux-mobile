@@ -246,6 +246,11 @@ test.describe("tmux-mobile browser behavior", () => {
       );
 
       await page.getByRole("button", { name: "Split H" }).click();
+      await expect
+        .poll(() => server.tmux.calls.some((call) => call.startsWith("splitWindow:")))
+        .toBe(true);
+      await expect(page.getByRole("button", { name: /^%\d+:/ })).toHaveCount(2);
+
       const zoomButton = page.getByRole("button", { name: "Zoom Pane" });
       await expect(zoomButton).toBeEnabled();
 
