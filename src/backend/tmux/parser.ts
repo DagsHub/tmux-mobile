@@ -26,11 +26,12 @@ export const parseWindows = (raw: string): Omit<TmuxWindowState, "panes">[] =>
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [index, name, active, panes] = splitLine(line);
+      const [index, name, active, zoomed, panes] = splitLine(line);
       return {
         index: Number.parseInt(index, 10),
         name,
         active: active === "1",
+        zoomed: zoomed === "1",
         paneCount: Number.parseInt(panes, 10)
       };
     });

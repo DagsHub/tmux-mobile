@@ -22,6 +22,7 @@ type ModifierMode = "off" | "sticky" | "locked";
 
 const query = new URLSearchParams(window.location.search);
 const token = query.get("token") ?? "";
+const clientIdStorageKey = "tmux-mobile-client-id";
 
 const wsOrigin = (() => {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -46,6 +47,7 @@ export const App = () => {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const controlSocketRef = useRef<WebSocket | null>(null);
   const terminalSocketRef = useRef<WebSocket | null>(null);
+  const persistedClientIdRef = useRef(localStorage.getItem(clientIdStorageKey) ?? "");
 
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -263,7 +265,14 @@ export const App = () => {
     const socket = new WebSocket(`${wsOrigin}/ws/control`);
 
     socket.onopen = () => {
-      socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
+      socket.send(
+        JSON.stringify({
+          type: "auth",
+          token,
+          password: passwordValue || undefined,
+          clientId: persistedClientIdRef.current || undefined
+        })
+      );
     };
 
     socket.onmessage = (event) => {
@@ -278,6 +287,8 @@ export const App = () => {
           setPasswordErrorMessage("");
           setAuthReady(true);
           setNeedsPasswordInput(false);
+          persistedClientIdRef.current = message.clientId;
+          localStorage.setItem(clientIdStorageKey, message.clientId);
           if (message.requiresPassword && passwordValue) {
             localStorage.setItem("tmux-mobile-password", passwordValue);
           } else {

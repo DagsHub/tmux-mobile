@@ -33,6 +33,13 @@ interface DataContext {
   controlContext?: ControlContext;
 }
 
+interface ReconnectState {
+  baseSession?: string;
+  paneId?: string;
+  zoomed?: boolean;
+  updatedAt: number;
+}
+
 export interface ServerDependencies {
   tmux: TmuxGateway;
   ptyFactory: PtyFactory;
@@ -78,6 +85,17 @@ const isManagedMobileSession = (name: string): boolean => name.startsWith(MOBILE
 
 const buildMobileSessionName = (clientId: string): string => `${MOBILE_SESSION_PREFIX}${clientId}`;
 
+const normalizeClientId = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 128) {
+    return undefined;
+  }
+  return trimmed;
+};
+
 export const createTmuxMobileServer = (
   config: RuntimeConfig,
   deps: ServerDependencies
@@ -115,21 +133,67 @@ export const createTmuxMobileServer = (
   const terminalWss = new WebSocketServer({ noServer: true });
   const controlClients = new Set<ControlContext>();
   const terminalClients = new Set<DataContext>();
+  const reconnectStateByClientId = new Map<string, ReconnectState>();
 
   let monitor: TmuxStateMonitor | undefined;
   let started = false;
   let stopPromise: Promise<void> | null = null;
 
+  const rememberReconnectState = (
+    context: ControlContext,
+    patch: Partial<Omit<ReconnectState, "updatedAt">>
+  ): void => {
+    if (!context.clientId) {
+      return;
+    }
+
+    const existing = reconnectStateByClientId.get(context.clientId);
+    reconnectStateByClientId.set(context.clientId, {
+      baseSession: patch.baseSession ?? existing?.baseSession,
+      paneId: patch.paneId ?? existing?.paneId,
+      zoomed: patch.zoomed ?? existing?.zoomed,
+      updatedAt: Date.now()
+    });
+  };
+
+  const updateReconnectStateFromSnapshot = (
+    context: ControlContext,
+    state: TmuxStateSnapshot
+  ): void => {
+    if (!context.authed || !context.attachedSession) {
+      return;
+    }
+
+    const attachedState = state.sessions.find((session) => session.name === context.attachedSession);
+    if (!attachedState) {
+      return;
+    }
+    const activeWindow =
+      attachedState.windowStates.find((windowState) => windowState.active) ?? attachedState.windowStates[0];
+    const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+    if (!activeWindow || !activePane) {
+      return;
+    }
+
+    rememberReconnectState(context, {
+      baseSession: context.baseSession,
+      paneId: activePane.id,
+      zoomed: activeWindow.zoomed
+    });
+  };
+
   const broadcastState = (state: TmuxStateSnapshot): void => {
     for (const client of controlClients) {
-      if (client.authed) {
-        sendJson(client.socket, { type: "tmux_state", state });
+      if (!client.authed) {
+        continue;
       }
+      sendJson(client.socket, { type: "tmux_state", state });
+      updateReconnectStateFromSnapshot(client, state);
     }
   };
 
   const getControlContext = (clientId: string): ControlContext | undefined =>
-    Array.from(controlClients).find((candidate) => candidate.clientId === clientId);
+    Array.from(controlClients).find((candidate) => candidate.authed && candidate.clientId === clientId);
 
   const getOrCreateRuntime = (context: ControlContext): TerminalRuntime => {
     if (context.runtime) {
@@ -152,6 +216,38 @@ export const createTmuxMobileServer = (
     return runtime;
   };
 
+  const tryRestoreClientView = async (context: ControlContext): Promise<void> => {
+    if (!context.attachedSession) {
+      return;
+    }
+
+    const reconnectState = reconnectStateByClientId.get(context.clientId);
+    if (!reconnectState?.paneId) {
+      return;
+    }
+
+    try {
+      await deps.tmux.selectPane(reconnectState.paneId);
+    } catch (error) {
+      logger.log("restore pane skipped", context.clientId, reconnectState.paneId, error);
+      return;
+    }
+
+    if (typeof reconnectState.zoomed !== "boolean") {
+      return;
+    }
+
+    try {
+      const windows = await deps.tmux.listWindows(context.attachedSession);
+      const activeWindow = windows.find((windowState) => windowState.active) ?? windows[0];
+      if (activeWindow && activeWindow.zoomed !== reconnectState.zoomed) {
+        await deps.tmux.zoomPane(reconnectState.paneId);
+      }
+    } catch (error) {
+      logger.log("restore zoom skipped", context.clientId, reconnectState.paneId, error);
+    }
+  };
+
   const attachControlToBaseSession = async (
     context: ControlContext,
     baseSession: string
@@ -171,7 +267,9 @@ export const createTmuxMobileServer = (
 
     context.baseSession = baseSession;
     context.attachedSession = mobileSession;
+    rememberReconnectState(context, { baseSession });
     runtime.attachToSession(mobileSession);
+    await tryRestoreClientView(context);
     sendJson(context.socket, { type: "attached", session: mobileSession });
   };
 
@@ -192,6 +290,16 @@ export const createTmuxMobileServer = (
       "sessions discovered",
       sessions.map((session) => `${session.name}:${session.attached ? "attached" : "detached"}`).join(",")
     );
+
+    const preferredSession = context.baseSession
+      ? sessions.find((session) => session.name === context.baseSession)
+      : undefined;
+    if (preferredSession) {
+      logger.log("reattach preferred session", preferredSession.name);
+      await attachControlToBaseSession(context, preferredSession.name);
+      return;
+    }
+
     if (sessions.length === 0) {
       await deps.tmux.createSession(config.defaultSession);
       logger.log("created default session", config.defaultSession);
@@ -242,6 +350,7 @@ export const createTmuxMobileServer = (
         return;
       case "select_pane":
         await deps.tmux.selectPane(message.paneId);
+        rememberReconnectState(context, { paneId: message.paneId });
         return;
       case "split_pane":
         await deps.tmux.splitWindow(message.paneId, message.orientation);
@@ -251,6 +360,10 @@ export const createTmuxMobileServer = (
         return;
       case "zoom_pane":
         await deps.tmux.zoomPane(message.paneId);
+        rememberReconnectState(context, {
+          paneId: message.paneId,
+          zoomed: !(reconnectStateByClientId.get(context.clientId)?.zoomed ?? false)
+        });
         return;
       case "capture_scrollback": {
         const lines = message.lines ?? config.scrollbackLines;
@@ -298,11 +411,11 @@ export const createTmuxMobileServer = (
     const context: ControlContext = {
       socket,
       authed: false,
-      clientId: randomToken(12),
+      clientId: "",
       terminalClients: new Set<DataContext>()
     };
     controlClients.add(context);
-    logger.log("control ws connected", context.clientId);
+    logger.log("control ws connected");
 
     socket.on("message", async (rawData) => {
       const message = parseClientMessage(rawData.toString("utf8"));
@@ -324,7 +437,7 @@ export const createTmuxMobileServer = (
             password: message.password
           });
           if (!authResult.ok) {
-            logger.log("control ws auth failed", context.clientId, authResult.reason ?? "unknown");
+            logger.log("control ws auth failed", authResult.reason ?? "unknown");
             sendJson(socket, {
               type: "auth_error",
               reason: authResult.reason ?? "unauthorized"
@@ -332,6 +445,25 @@ export const createTmuxMobileServer = (
             return;
           }
 
+          const requestedClientId = normalizeClientId(message.clientId);
+          if (requestedClientId) {
+            const existingContext = Array.from(controlClients).find(
+              (candidate) => candidate !== context && candidate.authed && candidate.clientId === requestedClientId
+            );
+            if (existingContext) {
+              controlClients.delete(existingContext);
+              await shutdownControlContext(existingContext);
+              if (
+                existingContext.socket.readyState === existingContext.socket.OPEN ||
+                existingContext.socket.readyState === existingContext.socket.CONNECTING
+              ) {
+                existingContext.socket.close(4000, "reconnected");
+              }
+            }
+          }
+
+          context.clientId = requestedClientId ?? randomToken(12);
+          context.baseSession = reconnectStateByClientId.get(context.clientId)?.baseSession;
           context.authed = true;
           logger.log("control ws auth ok", context.clientId);
           sendJson(socket, {
@@ -367,6 +499,7 @@ export const createTmuxMobileServer = (
     });
 
     socket.on("close", () => {
+      rememberReconnectState(context, { baseSession: context.baseSession });
       controlClients.delete(context);
       void shutdownControlContext(context);
       logger.log("control ws closed", context.clientId);
@@ -390,7 +523,7 @@ export const createTmuxMobileServer = (
           socket.close(4001, "auth required");
           return;
         }
-        const clientId = authMessage.clientId;
+        const clientId = normalizeClientId(authMessage.clientId);
         if (!clientId) {
           socket.close(4001, "unauthorized");
           return;

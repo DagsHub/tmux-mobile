@@ -31,6 +31,7 @@ export interface TmuxWindowState {
   index: number;
   name: string;
   active: boolean;
+  zoomed: boolean;
   paneCount: number;
   panes: TmuxPaneState[];
 }

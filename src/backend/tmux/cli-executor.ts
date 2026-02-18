@@ -7,7 +7,8 @@ import { withoutTmuxEnv } from "../util/env.js";
 const execFileAsync = promisify(execFile);
 
 const SESSION_FMT = "#{session_name}\t#{session_attached}\t#{session_windows}";
-const WINDOW_FMT = "#{window_index}\t#{window_name}\t#{window_active}\t#{window_panes}";
+const WINDOW_FMT =
+  "#{window_index}\t#{window_name}\t#{window_active}\t#{window_zoomed_flag}\t#{window_panes}";
 const PANE_FMT = "#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_active}\t#{pane_width}x#{pane_height}";
 
 interface TmuxCliExecutorOptions {
