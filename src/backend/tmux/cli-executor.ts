@@ -112,6 +112,10 @@ export class TmuxCliExecutor implements TmuxGateway {
     await this.runTmux(["new-session", "-d", "-s", name]);
   }
 
+  public async createGroupedSession(name: string, targetSession: string): Promise<void> {
+    await this.runTmux(["new-session", "-d", "-s", name, "-t", targetSession]);
+  }
+
   public async killSession(name: string): Promise<void> {
     await this.runTmux(["kill-session", "-t", name]);
   }
