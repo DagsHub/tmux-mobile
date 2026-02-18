@@ -192,7 +192,7 @@ export const createTmuxMobileServer = (
         return;
       case "select_pane":
         await deps.tmux.selectPane(message.paneId);
-        if (message.stickyZoom) {
+        if (message.stickyZoom === true && !(await deps.tmux.isPaneZoomed(message.paneId))) {
           await deps.tmux.zoomPane(message.paneId);
         }
         return;

@@ -148,6 +148,11 @@ export class TmuxCliExecutor implements TmuxGateway {
     await this.runTmux(["resize-pane", "-Z", "-t", paneId]);
   }
 
+  public async isPaneZoomed(paneId: string): Promise<boolean> {
+    const output = await this.runTmux(["display-message", "-p", "-t", paneId, "#{window_zoomed_flag}"]);
+    return output.trim() === "1";
+  }
+
   public async capturePane(paneId: string, lines: number): Promise<string> {
     return this.runTmux(["capture-pane", "-t", paneId, "-p", "-S", `-${lines}`]);
   }
