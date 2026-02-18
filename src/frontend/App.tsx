@@ -20,8 +20,20 @@ interface ServerConfig {
 type ModifierKey = "ctrl" | "alt" | "shift" | "meta";
 type ModifierMode = "off" | "sticky" | "locked";
 
+declare global {
+  interface Window {
+    __tmuxMobileDebugEvents?: Array<{
+      at: string;
+      event: string;
+      payload?: unknown;
+    }>;
+    __tmuxMobileDebugState?: unknown;
+  }
+}
+
 const query = new URLSearchParams(window.location.search);
 const token = query.get("token") ?? "";
+const debugMode = query.get("debug") === "1";
 
 const wsOrigin = (() => {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -49,6 +61,24 @@ const parseMessage = (raw: string): ControlServerMessage | null => {
   } catch {
     return null;
   }
+};
+
+const debugLog = (event: string, payload?: unknown): void => {
+  if (!debugMode) {
+    return;
+  }
+  const entry = {
+    at: new Date().toISOString(),
+    event,
+    payload
+  };
+  const current = window.__tmuxMobileDebugEvents ?? [];
+  current.push(entry);
+  if (current.length > 500) {
+    current.splice(0, current.length - 500);
+  }
+  window.__tmuxMobileDebugEvents = current;
+  console.log("[tmux-mobile-debug]", entry.at, event, payload ?? "");
 };
 
 export const App = () => {
@@ -135,10 +165,15 @@ export const App = () => {
 
   const sendControl = (payload: Record<string, unknown>): void => {
     if (controlSocketRef.current?.readyState !== WebSocket.OPEN) {
+      debugLog("send_control.blocked", {
+        payload,
+        readyState: controlSocketRef.current?.readyState
+      });
       setErrorMessage("control websocket disconnected");
       return;
     }
     setErrorMessage("");
+    debugLog("send_control", payload);
     controlSocketRef.current.send(JSON.stringify(payload));
   };
 
@@ -173,9 +208,15 @@ export const App = () => {
   const sendTerminal = (input: string, withModifiers = true): void => {
     const socket = terminalSocketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
+      debugLog("send_terminal.blocked", {
+        readyState: socket?.readyState,
+        withModifiers,
+        bytes: input.length
+      });
       return;
     }
     const output = withModifiers ? applyModifiers(input) : input;
+    debugLog("send_terminal", { withModifiers, inputBytes: input.length, outputBytes: output.length });
     socket.send(output);
   };
 
@@ -183,8 +224,13 @@ export const App = () => {
     const socket = terminalSocketRef.current;
     const terminal = terminalRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) {
+      debugLog("send_terminal_resize.blocked", {
+        socketReadyState: socket?.readyState,
+        hasTerminal: Boolean(terminal)
+      });
       return;
     }
+    debugLog("send_terminal_resize", { cols: terminal.cols, rows: terminal.rows });
     socket.send(
       JSON.stringify({
         type: "resize",
@@ -238,10 +284,12 @@ export const App = () => {
   };
 
   const openTerminalSocket = (passwordValue: string): void => {
+    debugLog("terminal_socket.open.begin", { hasPassword: Boolean(passwordValue) });
     terminalSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/terminal`);
     socket.onopen = () => {
+      debugLog("terminal_socket.onopen");
       socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
       setStatusMessage("terminal connected");
       if (fitAddonRef.current && terminalRef.current) {
@@ -251,16 +299,22 @@ export const App = () => {
     };
 
     socket.onmessage = (event) => {
+      debugLog("terminal_socket.onmessage", {
+        type: typeof event.data,
+        bytes: typeof event.data === "string" ? event.data.length : 0
+      });
       terminalRef.current?.write(typeof event.data === "string" ? event.data : "");
     };
 
     socket.onclose = (event) => {
+      debugLog("terminal_socket.onclose", { code: event.code, reason: event.reason });
       if (event.code === 4001) {
         setErrorMessage("terminal authentication failed");
       }
       setStatusMessage("terminal disconnected");
     };
     socket.onerror = () => {
+      debugLog("terminal_socket.onerror");
       setErrorMessage("terminal websocket error");
     };
 
@@ -268,22 +322,31 @@ export const App = () => {
   };
 
   const openControlSocket = (passwordValue: string): void => {
+    debugLog("control_socket.open.begin", { hasPassword: Boolean(passwordValue) });
     controlSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/control`);
 
     socket.onopen = () => {
+      debugLog("control_socket.onopen");
       socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
     };
 
     socket.onmessage = (event) => {
+      debugLog("control_socket.onmessage.raw", { bytes: String(event.data).length });
       const message = parseMessage(String(event.data));
       if (!message) {
+        debugLog("control_socket.onmessage.parse_error", { raw: String(event.data) });
         return;
       }
+      debugLog("control_socket.onmessage", { type: message.type });
 
       switch (message.type) {
         case "auth_ok":
+          debugLog("control_socket.auth_ok", {
+            clientId: message.clientId,
+            requiresPassword: message.requiresPassword
+          });
           setErrorMessage("");
           setPasswordErrorMessage("");
           setAuthReady(true);
@@ -296,6 +359,7 @@ export const App = () => {
           openTerminalSocket(passwordValue);
           return;
         case "auth_error":
+          debugLog("control_socket.auth_error", { reason: message.reason });
           setErrorMessage(message.reason);
           setAuthReady(false);
           const passwordAuthFailed =
@@ -307,6 +371,7 @@ export const App = () => {
           }
           return;
         case "attached":
+          debugLog("control_socket.attached", { session: message.session });
           setAttachedSession(message.session);
           setSessionChoices(null);
           setDrawerOpen(false);
@@ -317,25 +382,56 @@ export const App = () => {
           sendTerminalResize();
           return;
         case "session_picker":
+          debugLog("control_socket.session_picker", {
+            sessions: message.sessions.map((session) => ({
+              name: session.name,
+              attached: session.attached,
+              windows: session.windows
+            }))
+          });
           setSessionChoices(message.sessions);
           return;
         case "tmux_state":
+          debugLog("control_socket.tmux_state", {
+            capturedAt: message.state.capturedAt,
+            sessionCount: message.state.sessions.length,
+            sessions: message.state.sessions.map((session) => {
+              const activeWindow =
+                session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+              const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+              return {
+                name: session.name,
+                attached: session.attached,
+                activeWindow: activeWindow ? `${activeWindow.index}:${activeWindow.name}` : null,
+                activePane: activePane?.id ?? null,
+                activePaneZoomed: activePane?.zoomed ?? null
+              };
+            })
+          });
           setSnapshot(message.state);
           return;
         case "scrollback":
+          debugLog("control_socket.scrollback", {
+            paneId: message.paneId,
+            lines: message.lines,
+            bytes: message.text.length
+          });
           setScrollbackText(message.text);
           setScrollbackVisible(true);
           return;
         case "error":
+          debugLog("control_socket.error", { message: message.message });
           setErrorMessage(message.message);
           return;
         case "info":
+          debugLog("control_socket.info", { message: message.message });
           setStatusMessage(message.message);
           return;
       }
     };
 
     socket.onclose = () => {
+      debugLog("control_socket.onclose");
       setAuthReady(false);
     };
 
@@ -348,15 +444,18 @@ export const App = () => {
       return;
     }
 
+    debugLog("config.fetch.begin");
     fetch("/api/config")
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`config request failed: ${response.status}`);
         }
         const config = (await response.json()) as ServerConfig;
+        debugLog("config.fetch.ok", config);
         setServerConfig(config);
 
         if (config.passwordRequired && !password) {
+          debugLog("config.fetch.password_required");
           setNeedsPasswordInput(true);
           setPasswordErrorMessage("");
           return;
@@ -365,6 +464,7 @@ export const App = () => {
         openControlSocket(password);
       })
       .catch((error: Error) => {
+        debugLog("config.fetch.error", { message: error.message });
         setErrorMessage(error.message);
       });
   }, []);
@@ -456,6 +556,36 @@ export const App = () => {
   useEffect(() => {
     localStorage.setItem("tmux-mobile-sticky-zoom", stickyZoom ? "true" : "false");
   }, [stickyZoom]);
+
+  useEffect(() => {
+    if (!debugMode) {
+      return;
+    }
+    const sessionSummary = snapshot.sessions.map((session) => {
+      const activeWindow =
+        session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+      const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+      return {
+        name: session.name,
+        attached: session.attached,
+        activeWindow: activeWindow ? `${activeWindow.index}:${activeWindow.name}` : null,
+        activePane: activePane?.id ?? null,
+        activePaneZoomed: activePane?.zoomed ?? null
+      };
+    });
+    const derived = {
+      attachedSession,
+      activeSession: activeSession?.name ?? null,
+      activeWindow: activeWindow ? `${activeWindow.index}:${activeWindow.name}` : null,
+      activePane: activePane?.id ?? null,
+      activePaneZoomed: activePane?.zoomed ?? null,
+      topStatus,
+      snapshotCapturedAt: snapshot.capturedAt,
+      sessions: sessionSummary
+    };
+    window.__tmuxMobileDebugState = derived;
+    debugLog("derived_state", derived);
+  }, [attachedSession, activeSession, activeWindow, activePane, snapshot, topStatus]);
 
   const submitPassword = (): void => {
     setPasswordErrorMessage("");

@@ -66,11 +66,41 @@ const sendJson = (socket: WebSocket, payload: ControlServerMessage): void => {
   }
 };
 
+const summarizeClientMessage = (message: ControlClientMessage): string => {
+  if (message.type === "auth") {
+    return JSON.stringify({
+      type: message.type,
+      tokenPresent: Boolean(message.token),
+      passwordPresent: Boolean(message.password)
+    });
+  }
+  return JSON.stringify(message);
+};
+
+const summarizeState = (state: TmuxStateSnapshot): string => {
+  const sessions = state.sessions.map((session) => {
+    const activeWindow =
+      session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+    const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+    return `${session.name}[attached=${session.attached}]` +
+      `{window=${activeWindow ? `${activeWindow.index}:${activeWindow.name}` : "none"},` +
+      `pane=${activePane ? `${activePane.id}:zoom=${activePane.zoomed}` : "none"},` +
+      `windows=${session.windowStates.length}}`;
+  });
+  return `capturedAt=${state.capturedAt}; sessions=${sessions.join(" | ")}`;
+};
+
 export const createTmuxMobileServer = (
   config: RuntimeConfig,
   deps: ServerDependencies
 ): RunningServer => {
   const logger = deps.logger ?? console;
+  const verboseDebug = process.env.TMUX_MOBILE_VERBOSE_DEBUG === "1";
+  const verboseLog = (...args: unknown[]): void => {
+    if (verboseDebug) {
+      logger.log(...args);
+    }
+  };
   const authService = deps.authService ?? new AuthService(config.password, config.token);
 
   const app = express();
@@ -110,11 +140,16 @@ export const createTmuxMobileServer = (
   let stopPromise: Promise<void> | null = null;
 
   runtime.on("data", (chunk) => {
+    verboseLog("runtime data chunk", `bytes=${Buffer.byteLength(chunk, "utf8")}`);
     for (const client of terminalClients) {
       if (client.authed && client.socket.readyState === client.socket.OPEN) {
         client.socket.send(chunk);
       }
     }
+  });
+
+  runtime.on("attach", (session) => {
+    verboseLog("runtime attached session", session);
   });
 
   runtime.on("exit", (code) => {
@@ -125,6 +160,11 @@ export const createTmuxMobileServer = (
   });
 
   const broadcastState = (state: TmuxStateSnapshot): void => {
+    verboseLog(
+      "broadcast tmux_state",
+      `authedControlClients=${[...controlClients].filter((client) => client.authed).length}`,
+      summarizeState(state)
+    );
     for (const client of controlClients) {
       if (client.authed) {
         sendJson(client.socket, { type: "tmux_state", state });
@@ -244,6 +284,7 @@ export const createTmuxMobileServer = (
         return;
       }
       logger.log("control ws message", context.clientId, message.type);
+      verboseLog("control ws payload", context.clientId, summarizeClientMessage(message));
 
       try {
         if (!context.authed) {
@@ -286,9 +327,13 @@ export const createTmuxMobileServer = (
         }
 
         try {
+          verboseLog("control mutation start", context.clientId, message.type);
           await runControlMutation(message, socket);
+          verboseLog("control mutation done", context.clientId, message.type);
         } finally {
+          verboseLog("force publish start", context.clientId, message.type);
           await monitor?.forcePublish();
+          verboseLog("force publish done", context.clientId, message.type);
         }
       } catch (error) {
         logger.error("control ws error", context.clientId, error);
@@ -339,6 +384,15 @@ export const createTmuxMobileServer = (
       }
 
       if (isBinary) {
+        const binaryBytes =
+          typeof rawData === "string"
+            ? Buffer.byteLength(rawData, "utf8")
+            : rawData instanceof ArrayBuffer
+              ? rawData.byteLength
+              : Array.isArray(rawData)
+                ? rawData.reduce((sum, chunk) => sum + chunk.length, 0)
+                : rawData.length;
+        verboseLog("terminal ws binary input", `bytes=${binaryBytes}`);
         runtime.write(rawData.toString());
         return;
       }
@@ -354,6 +408,7 @@ export const createTmuxMobileServer = (
             typeof payload.rows === "number"
           ) {
             runtime.resize(payload.cols, payload.rows);
+            verboseLog("terminal ws resize", `${payload.cols}x${payload.rows}`);
             return;
           }
         } catch {
@@ -362,6 +417,7 @@ export const createTmuxMobileServer = (
       }
 
       runtime.write(text);
+      verboseLog("terminal ws text input", `bytes=${Buffer.byteLength(text, "utf8")}`);
     });
 
     socket.on("close", () => {
