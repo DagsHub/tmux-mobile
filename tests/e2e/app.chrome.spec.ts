@@ -234,6 +234,9 @@ test.describe("tmux-mobile browser behavior", () => {
     });
 
     test("shows zoom indicators for active pane in drawer and top bar", async ({ page }) => {
+      const initialPanes = await server.tmux.listPanes("main", 0);
+      await server.tmux.splitWindow(initialPanes[0].id, "h");
+
       await page.goto(`${server.baseUrl}/?token=${server.token}`);
       await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
       await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
@@ -244,11 +247,6 @@ test.describe("tmux-mobile browser behavior", () => {
         "aria-label",
         "Pane zoom: off"
       );
-
-      await page.getByRole("button", { name: "Split H" }).click();
-      await expect
-        .poll(() => server.tmux.calls.some((call) => call.startsWith("splitWindow:")))
-        .toBe(true);
       await expect(page.getByRole("button", { name: /^%\d+:/ })).toHaveCount(2);
 
       const zoomButton = page.getByRole("button", { name: "Zoom Pane" });
