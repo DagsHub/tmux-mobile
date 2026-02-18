@@ -29,7 +29,8 @@ describe("tmux mobile server", () => {
 
   const authControl = async (
     control: WebSocket,
-    token: string = "test-token"
+    token: string = "test-token",
+    clientId?: string
   ): Promise<{ clientId: string; attachedSession: string }> => {
     const authOkPromise = waitForMessage<{ type: string; clientId: string }>(
       control,
@@ -39,7 +40,7 @@ describe("tmux mobile server", () => {
       control,
       (msg) => msg.type === "attached"
     );
-    control.send(JSON.stringify({ type: "auth", token }));
+    control.send(JSON.stringify({ type: "auth", token, clientId }));
     const authOk = await authOkPromise;
     const attached = await attachedPromise;
     return { clientId: authOk.clientId, attachedSession: attached.session };
@@ -256,5 +257,76 @@ describe("tmux mobile server", () => {
   test("stop is idempotent when called repeatedly", async () => {
     await runningServer.stop();
     await runningServer.stop();
+  });
+
+  test("reuses client identity and restores pane + zoom after reconnect", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const controlFirst = await openSocket(`${baseWsUrl}/ws/control`);
+    let controlSecond: WebSocket | undefined;
+    try {
+      const firstAuth = await authControl(controlFirst);
+      const firstSnapshot = await buildSnapshot(tmux);
+      const firstSession = firstSnapshot.sessions.find(
+        (session) => session.name === firstAuth.attachedSession
+      );
+      const paneId = firstSession?.windowStates[0]?.panes[0]?.id;
+      expect(paneId).toBeDefined();
+
+      controlFirst.send(JSON.stringify({ type: "select_pane", paneId }));
+      controlFirst.send(JSON.stringify({ type: "zoom_pane", paneId }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      controlFirst.close();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      controlSecond = await openSocket(`${baseWsUrl}/ws/control`);
+      const secondAuth = await authControl(controlSecond, "test-token", firstAuth.clientId);
+
+      expect(secondAuth.clientId).toBe(firstAuth.clientId);
+      expect(tmux.calls).toContain(`selectPane:${paneId}`);
+      expect(tmux.calls.filter((call) => call === `zoomPane:${paneId}`).length).toBeGreaterThanOrEqual(2);
+    } finally {
+      controlFirst.close();
+      controlSecond?.close();
+    }
+  });
+
+  test("reconnect restore is best-effort when remembered pane no longer exists", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const controlFirst = await openSocket(`${baseWsUrl}/ws/control`);
+    let controlSecond: WebSocket | undefined;
+    try {
+      const firstAuth = await authControl(controlFirst);
+      const firstSnapshot = await buildSnapshot(tmux);
+      const firstSession = firstSnapshot.sessions.find(
+        (session) => session.name === firstAuth.attachedSession
+      );
+      const paneId = firstSession?.windowStates[0]?.panes[0]?.id;
+      expect(paneId).toBeDefined();
+
+      controlFirst.send(JSON.stringify({ type: "select_pane", paneId }));
+      controlFirst.send(JSON.stringify({ type: "zoom_pane", paneId }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      controlFirst.close();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+
+      await tmux.killPane(paneId as string);
+
+      controlSecond = await openSocket(`${baseWsUrl}/ws/control`);
+      const secondAuth = await authControl(controlSecond, "test-token", firstAuth.clientId);
+      expect(secondAuth.clientId).toBe(firstAuth.clientId);
+
+      const maybeError = await Promise.race([
+        waitForMessage<{ type: string; message?: string }>(controlSecond, (msg) => msg.type === "error"),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 80))
+      ]);
+      expect(maybeError).toBeNull();
+    } finally {
+      controlFirst.close();
+      controlSecond?.close();
+    }
   });
 });

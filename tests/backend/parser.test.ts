@@ -11,8 +11,8 @@ describe("tmux parser", () => {
   });
 
   test("parses windows and panes", () => {
-    const windows = parseWindows("0\tbash\t1\t2");
-    expect(windows[0]).toEqual({ index: 0, name: "bash", active: true, paneCount: 2 });
+    const windows = parseWindows("0\tbash\t1\t0\t2");
+    expect(windows[0]).toEqual({ index: 0, name: "bash", active: true, zoomed: false, paneCount: 2 });
 
     const panes = parsePanes("0\t%1\tbash\t1\t120x30");
     expect(panes[0]).toEqual({
