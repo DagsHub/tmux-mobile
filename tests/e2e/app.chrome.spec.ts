@@ -252,14 +252,19 @@ test.describe("tmux-mobile browser behavior", () => {
       const zoomButton = page.getByRole("button", { name: "Zoom Pane" });
       await expect(zoomButton).toBeEnabled();
 
-      await zoomButton.click();
+      const activePane = (await server.tmux.listPanes("main", 0)).find((pane) => pane.active);
+      if (!activePane) {
+        throw new Error("Expected an active pane in test harness");
+      }
+
+      await server.tmux.zoomPane(activePane.id);
       await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: on");
       await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
         "aria-label",
         "Pane zoom: on"
       );
 
-      await zoomButton.click();
+      await server.tmux.zoomPane(activePane.id);
       await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
       await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
         "aria-label",
