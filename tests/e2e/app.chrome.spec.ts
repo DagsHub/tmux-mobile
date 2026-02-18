@@ -304,6 +304,16 @@ test.describe("tmux-mobile browser behavior", () => {
 
       await page.getByTestId("drawer-toggle").click();
       await expect(page.locator(".drawer")).toBeVisible();
+      const mainSessionButton = page
+        .getByTestId("sessions-list")
+        .getByRole("button", { name: /^main\b/ });
+      await expect(mainSessionButton).toBeVisible();
+      await mainSessionButton.click();
+      await expect(page.locator(".drawer")).toHaveCount(0);
+
+      // Re-open drawer after explicit attach to pin UI state to "main".
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
       await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
         "aria-label",
         "Pane zoom: off"
