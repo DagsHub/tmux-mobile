@@ -139,7 +139,7 @@ describe("approval flow integration", () => {
 
     // Should also get attached message
     const attached = await waitFor((msg) => msg.type === "attached") as { type: string; session: string };
-    expect(attached.session).toBe("main");
+    expect(attached.session).toMatch(/^tmux-mobile-client-/);
 
     control.close();
   });
@@ -182,7 +182,7 @@ describe("approval flow integration", () => {
 
     // Should proceed to session attachment
     const attached = await waitFor((msg) => msg.type === "attached") as { type: string; session: string };
-    expect(attached.session).toBe("main");
+    expect(attached.session).toMatch(/^tmux-mobile-client-/);
 
     control.close();
   });
@@ -229,7 +229,7 @@ describe("approval flow integration", () => {
 
     // Should also attach to session
     const attached = await waitFor2((msg) => msg.type === "attached") as { type: string; session: string };
-    expect(attached.session).toBe("main");
+    expect(attached.session).toMatch(/^tmux-mobile-client-/);
 
     // No pending connections should exist
     expect(approvalService.getPending()).toHaveLength(0);
@@ -291,12 +291,17 @@ describe("approval flow integration", () => {
     const { waitFor } = collectMessages(control);
 
     control.send(JSON.stringify({ type: "auth", token: "test-token", password: "secret123" }));
-    const authResponse = await waitFor((msg) => msg.type === "auth_approved") as { type: string; jwt?: string };
+    const authResponse = await waitFor((msg) => msg.type === "auth_approved") as {
+      type: string;
+      jwt?: string;
+      clientId?: string;
+    };
     const jwt = authResponse.jwt!;
+    const clientId = authResponse.clientId!;
 
     // Now connect terminal WS with the JWT
     const terminal = await openSocket(`${baseWsUrl}/ws/terminal`);
-    terminal.send(JSON.stringify({ type: "auth", token: "test-token", jwt }));
+    terminal.send(JSON.stringify({ type: "auth", token: "test-token", jwt, clientId }));
 
     // Wait for auth to process
     await new Promise((resolve) => setTimeout(resolve, 50));

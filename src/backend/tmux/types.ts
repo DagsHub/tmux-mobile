@@ -21,6 +21,7 @@ export interface TmuxGateway {
   killPane(paneId: string): Promise<void>;
   selectPane(paneId: string): Promise<void>;
   zoomPane(paneId: string): Promise<void>;
+  isPaneZoomed(paneId: string): Promise<boolean>;
   capturePane(paneId: string, lines: number): Promise<string>;
 }
 

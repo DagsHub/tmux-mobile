@@ -25,6 +25,27 @@ export interface StartedE2EServer {
 export const startE2EServer = async (
   options: E2EServerOptions
 ): Promise<StartedE2EServer> => {
+  process.env.TMUX_MOBILE_VERBOSE_DEBUG = "1";
+
+  const formatLogPart = (value: unknown): string => {
+    if (typeof value === "string") {
+      return value;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
+  const e2eLogger: Pick<Console, "log" | "error"> = {
+    log: (...args: unknown[]) => {
+      console.log(`[e2e-backend ${new Date().toISOString()}] ${args.map(formatLogPart).join(" ")}`);
+    },
+    error: (...args: unknown[]) => {
+      console.error(`[e2e-backend ${new Date().toISOString()}] ${args.map(formatLogPart).join(" ")}`);
+    }
+  };
+
   const token = "e2e-token";
   const authService = new AuthService(options.password, token);
   const tmux = new FakeTmuxGateway(options.sessions, {
@@ -51,10 +72,7 @@ export const startE2EServer = async (
     tmux,
     ptyFactory,
     authService,
-    logger: {
-      log: () => undefined,
-      error: () => undefined
-    }
+    logger: e2eLogger
   });
 
   await server.start();

@@ -21,8 +21,20 @@ interface ServerConfig {
 type ModifierKey = "ctrl" | "alt" | "shift" | "meta";
 type ModifierMode = "off" | "sticky" | "locked";
 
+declare global {
+  interface Window {
+    __tmuxMobileDebugEvents?: Array<{
+      at: string;
+      event: string;
+      payload?: unknown;
+    }>;
+    __tmuxMobileDebugState?: unknown;
+  }
+}
+
 const query = new URLSearchParams(window.location.search);
 const token = query.get("token") ?? "";
+const debugMode = query.get("debug") === "1";
 
 const wsOrigin = (() => {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
@@ -33,12 +45,41 @@ const getPreferredTerminalFontSize = (): number => {
   return window.matchMedia("(max-width: 768px), (pointer: coarse)").matches ? 12 : 14;
 };
 
+const getInitialStickyZoom = (): boolean => {
+  const stored = localStorage.getItem("tmux-mobile-sticky-zoom");
+  if (stored === "true") {
+    return true;
+  }
+  if (stored === "false") {
+    return false;
+  }
+  return window.matchMedia("(max-width: 768px)").matches;
+};
+
 const parseMessage = (raw: string): ControlServerMessage | null => {
   try {
     return JSON.parse(raw) as ControlServerMessage;
   } catch {
     return null;
   }
+};
+
+const debugLog = (event: string, payload?: unknown): void => {
+  if (!debugMode) {
+    return;
+  }
+  const entry = {
+    at: new Date().toISOString(),
+    event,
+    payload
+  };
+  const current = window.__tmuxMobileDebugEvents ?? [];
+  current.push(entry);
+  if (current.length > 500) {
+    current.splice(0, current.length - 500);
+  }
+  window.__tmuxMobileDebugEvents = current;
+  console.log("[tmux-mobile-debug]", entry.at, event, payload ?? "");
 };
 
 export const App = () => {
@@ -87,6 +128,7 @@ export const App = () => {
     localStorage.getItem("tmux-mobile-toolbar-expanded") === "true"
   );
   const [toolbarDeepExpanded, setToolbarDeepExpanded] = useState(false);
+  const [stickyZoom, setStickyZoom] = useState(getInitialStickyZoom);
 
   const activeSession: TmuxSessionState | undefined = useMemo(() => {
     const selected = snapshot.sessions.find((session) => session.name === attachedSession);
@@ -131,10 +173,15 @@ export const App = () => {
 
   const sendControl = (payload: Record<string, unknown>): void => {
     if (controlSocketRef.current?.readyState !== WebSocket.OPEN) {
+      debugLog("send_control.blocked", {
+        payload,
+        readyState: controlSocketRef.current?.readyState
+      });
       setErrorMessage("control websocket disconnected");
       return;
     }
     setErrorMessage("");
+    debugLog("send_control", payload);
     controlSocketRef.current.send(JSON.stringify(payload));
   };
 
@@ -169,9 +216,15 @@ export const App = () => {
   const sendTerminal = (input: string, withModifiers = true): void => {
     const socket = terminalSocketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
+      debugLog("send_terminal.blocked", {
+        readyState: socket?.readyState,
+        withModifiers,
+        bytes: input.length
+      });
       return;
     }
     const output = withModifiers ? applyModifiers(input) : input;
+    debugLog("send_terminal", { withModifiers, inputBytes: input.length, outputBytes: output.length });
     socket.send(output);
   };
 
@@ -179,8 +232,13 @@ export const App = () => {
     const socket = terminalSocketRef.current;
     const terminal = terminalRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN || !terminal) {
+      debugLog("send_terminal_resize.blocked", {
+        socketReadyState: socket?.readyState,
+        hasTerminal: Boolean(terminal)
+      });
       return;
     }
+    debugLog("send_terminal_resize", { cols: terminal.cols, rows: terminal.rows });
     socket.send(
       JSON.stringify({
         type: "resize",
@@ -234,6 +292,7 @@ export const App = () => {
   };
 
   const openTerminalSocket = (passwordValue: string, clientId: string, jwtValue?: string | null): void => {
+    debugLog("terminal_socket.open.begin", { hasPassword: Boolean(passwordValue), hasJwt: Boolean(jwtValue) });
     terminalSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/terminal`);
@@ -253,16 +312,22 @@ export const App = () => {
     };
 
     socket.onmessage = (event) => {
+      debugLog("terminal_socket.onmessage", {
+        type: typeof event.data,
+        bytes: typeof event.data === "string" ? event.data.length : 0
+      });
       terminalRef.current?.write(typeof event.data === "string" ? event.data : "");
     };
 
     socket.onclose = (event) => {
+      debugLog("terminal_socket.onclose", { code: event.code, reason: event.reason });
       if (event.code === 4001) {
         setErrorMessage("terminal authentication failed");
       }
       setStatusMessage("terminal disconnected");
     };
     socket.onerror = () => {
+      debugLog("terminal_socket.onerror");
       setErrorMessage("terminal websocket error");
     };
 
@@ -270,6 +335,7 @@ export const App = () => {
   };
 
   const openControlSocket = (passwordValue: string, jwtValue?: string | null): void => {
+    debugLog("control_socket.open.begin", { hasPassword: Boolean(passwordValue), hasJwt: Boolean(jwtValue) });
     controlSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/control`);
@@ -285,13 +351,20 @@ export const App = () => {
     };
 
     socket.onmessage = (event) => {
+      debugLog("control_socket.onmessage.raw", { bytes: String(event.data).length });
       const message = parseMessage(String(event.data));
       if (!message) {
+        debugLog("control_socket.onmessage.parse_error", { raw: String(event.data) });
         return;
       }
+      debugLog("control_socket.onmessage", { type: message.type });
 
       switch (message.type) {
         case "auth_ok":
+          debugLog("control_socket.auth_ok", {
+            clientId: message.clientId,
+            requiresPassword: message.requiresPassword
+          });
           setErrorMessage("");
           setPasswordErrorMessage("");
           setAuthReady(true);
@@ -332,6 +405,7 @@ export const App = () => {
           setPasswordErrorMessage("Connection denied. Enter password to connect.");
           return;
         case "auth_error":
+          debugLog("control_socket.auth_error", { reason: message.reason });
           setErrorMessage(message.reason);
           setAuthReady(false);
           // If JWT auth failed, clear stored JWT and fall through
@@ -348,6 +422,7 @@ export const App = () => {
           }
           return;
         case "attached":
+          debugLog("control_socket.attached", { session: message.session });
           setAttachedSession(message.session);
           setSessionChoices(null);
           setDrawerOpen(false);
@@ -358,25 +433,56 @@ export const App = () => {
           sendTerminalResize();
           return;
         case "session_picker":
+          debugLog("control_socket.session_picker", {
+            sessions: message.sessions.map((session) => ({
+              name: session.name,
+              attached: session.attached,
+              windows: session.windows
+            }))
+          });
           setSessionChoices(message.sessions);
           return;
         case "tmux_state":
+          debugLog("control_socket.tmux_state", {
+            capturedAt: message.state.capturedAt,
+            sessionCount: message.state.sessions.length,
+            sessions: message.state.sessions.map((session) => {
+              const activeWindow =
+                session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+              const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+              return {
+                name: session.name,
+                attached: session.attached,
+                activeWindow: activeWindow ? `${activeWindow.index}:${activeWindow.name}` : null,
+                activePane: activePane?.id ?? null,
+                activePaneZoomed: activePane?.zoomed ?? null
+              };
+            })
+          });
           setSnapshot(message.state);
           return;
         case "scrollback":
+          debugLog("control_socket.scrollback", {
+            paneId: message.paneId,
+            lines: message.lines,
+            bytes: message.text.length
+          });
           setScrollbackText(message.text);
           setScrollbackVisible(true);
           return;
         case "error":
+          debugLog("control_socket.error", { message: message.message });
           setErrorMessage(message.message);
           return;
         case "info":
+          debugLog("control_socket.info", { message: message.message });
           setStatusMessage(message.message);
           return;
       }
     };
 
     socket.onclose = () => {
+      debugLog("control_socket.onclose");
       setAuthReady(false);
     };
 
@@ -389,12 +495,14 @@ export const App = () => {
       return;
     }
 
+    debugLog("config.fetch.begin");
     fetch("/api/config")
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`config request failed: ${response.status}`);
         }
         const config = (await response.json()) as ServerConfig;
+        debugLog("config.fetch.ok", config);
         setServerConfig(config);
 
         // Try JWT first if stored
@@ -411,6 +519,7 @@ export const App = () => {
             openControlSocket("");
             return;
           }
+          debugLog("config.fetch.password_required");
           setNeedsPasswordInput(true);
           setPasswordErrorMessage("");
           return;
@@ -419,6 +528,7 @@ export const App = () => {
         openControlSocket(password);
       })
       .catch((error: Error) => {
+        debugLog("config.fetch.error", { message: error.message });
         setErrorMessage(error.message);
       });
   }, []);
@@ -506,6 +616,41 @@ export const App = () => {
     localStorage.setItem("tmux-mobile-toolbar-expanded", toolbarExpanded ? "true" : "false");
   }, [toolbarExpanded]);
 
+  // Persist sticky zoom state
+  useEffect(() => {
+    localStorage.setItem("tmux-mobile-sticky-zoom", stickyZoom ? "true" : "false");
+  }, [stickyZoom]);
+
+  useEffect(() => {
+    if (!debugMode) {
+      return;
+    }
+    const sessionSummary = snapshot.sessions.map((session) => {
+      const activeWindow =
+        session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+      const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+      return {
+        name: session.name,
+        attached: session.attached,
+        activeWindow: activeWindow ? `${activeWindow.index}:${activeWindow.name}` : null,
+        activePane: activePane?.id ?? null,
+        activePaneZoomed: activePane?.zoomed ?? null
+      };
+    });
+    const derived = {
+      attachedSession,
+      activeSession: activeSession?.name ?? null,
+      activeWindow: activeWindow ? `${activeWindow.index}:${activeWindow.name}` : null,
+      activePane: activePane?.id ?? null,
+      activePaneZoomed: activePane?.zoomed ?? null,
+      topStatus,
+      snapshotCapturedAt: snapshot.capturedAt,
+      sessions: sessionSummary
+    };
+    window.__tmuxMobileDebugState = derived;
+    debugLog("derived_state", derived);
+  }, [attachedSession, activeSession, activeWindow, activePane, snapshot, topStatus]);
+
   const submitPassword = (): void => {
     setPasswordErrorMessage("");
     setPendingApproval(false);
@@ -538,6 +683,18 @@ export const App = () => {
     terminalRef.current?.focus();
   };
 
+  const selectWindow = (windowState: TmuxWindowState): void => {
+    if (!activeSession) {
+      return;
+    }
+    sendControl({
+      type: "select_window",
+      session: activeSession.name,
+      windowIndex: windowState.index,
+      ...(stickyZoom && !windowState.active ? { stickyZoom: true } : {})
+    });
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -558,6 +715,16 @@ export const App = () => {
             aria-label={`Status: ${topStatus.label}`}
             data-testid="top-status-indicator"
           />
+          <button
+            className={`top-zoom-indicator${activePane?.zoomed ? " on" : ""}`}
+            title={activePane?.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
+            aria-label={`Pane zoom: ${activePane?.zoomed ? "on" : "off"}`}
+            data-testid="top-zoom-indicator"
+            onClick={() => activePane && sendControl({ type: "zoom_pane", paneId: activePane.id })}
+            disabled={!activePane || !activeWindow || activeWindow.paneCount <= 1}
+          >
+            🔍
+          </button>
           <button className="top-btn" onClick={() => requestScrollback(serverConfig?.scrollbackLines ?? 1000)}>
             Scroll
           </button>
@@ -725,13 +892,7 @@ export const App = () => {
                 ? activeSession.windowStates.map((windowState) => (
                     <li key={`${activeSession.name}-${windowState.index}`}>
                       <button
-                        onClick={() =>
-                          sendControl({
-                            type: "select_window",
-                            session: activeSession.name,
-                            windowIndex: windowState.index
-                          })
-                        }
+                        onClick={() => selectWindow(windowState)}
                         className={windowState.active ? "active" : ""}
                       >
                         {windowState.index}: {windowState.name} {windowState.active ? "*" : ""}
@@ -757,10 +918,24 @@ export const App = () => {
                 ? activeWindow.panes.map((pane) => (
                     <li key={pane.id}>
                       <button
-                        onClick={() => sendControl({ type: "select_pane", paneId: pane.id })}
+                        onClick={() => sendControl({
+                          type: "select_pane",
+                          paneId: pane.id,
+                          ...(stickyZoom && !pane.active ? { stickyZoom: true } : {})
+                        })}
                         className={pane.active ? "active" : ""}
                       >
                         %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
+                        {pane.active && pane.zoomed ? (
+                          <span
+                            className="pane-zoom-indicator on"
+                            title="Active pane is zoomed"
+                            aria-label="Pane zoom: on"
+                            data-testid="active-pane-zoom-indicator"
+                          >
+                            🔍
+                          </span>
+                        ) : null}
                       </button>
                     </li>
                   ))
@@ -794,6 +969,13 @@ export const App = () => {
               disabled={!activePane || !activeWindow || activeWindow.paneCount <= 1}
             >
               Zoom Pane
+            </button>
+            <button
+              className={`drawer-section-action${stickyZoom ? " active" : ""}`}
+              onClick={() => setStickyZoom((v) => !v)}
+              data-testid="sticky-zoom-toggle"
+            >
+              Sticky Zoom: {stickyZoom ? "On" : "Off"}
             </button>
 
             <button

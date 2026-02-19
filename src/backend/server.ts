@@ -77,6 +77,37 @@ const sendJson = (socket: WebSocket, payload: ControlServerMessage): void => {
   }
 };
 
+const summarizeClientMessage = (message: ControlClientMessage): string => {
+  if (message.type === "auth") {
+    return JSON.stringify({
+      type: message.type,
+      tokenPresent: Boolean(message.token),
+      passwordPresent: Boolean(message.password),
+      clientIdPresent: Boolean(message.clientId)
+    });
+  }
+  if (message.type === "send_compose") {
+    return JSON.stringify({
+      type: message.type,
+      textLength: message.text.length
+    });
+  }
+  return JSON.stringify({ type: message.type });
+};
+
+const summarizeState = (state: TmuxStateSnapshot): string => {
+  const sessions = state.sessions.map((session) => {
+    const activeWindow =
+      session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+    const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+    return `${session.name}[attached=${session.attached}]` +
+      `{window=${activeWindow ? `${activeWindow.index}:${activeWindow.name}` : "none"},` +
+      `pane=${activePane ? `${activePane.id}:zoom=${activePane.zoomed}` : "none"},` +
+      `windows=${session.windowStates.length}}`;
+  });
+  return `capturedAt=${state.capturedAt}; sessions=${sessions.join(" | ")}`;
+};
+
 const MOBILE_SESSION_PREFIX = "tmux-mobile-client-";
 
 const isManagedMobileSession = (name: string): boolean => name.startsWith(MOBILE_SESSION_PREFIX);
@@ -88,6 +119,12 @@ export const createTmuxMobileServer = (
   deps: ServerDependencies
 ): RunningServer => {
   const logger = deps.logger ?? console;
+  const verboseDebug = process.env.TMUX_MOBILE_VERBOSE_DEBUG === "1";
+  const verboseLog = (...args: unknown[]): void => {
+    if (verboseDebug) {
+      logger.log(...args);
+    }
+  };
   const authService = deps.authService ?? new AuthService(config.password, config.token);
   const approvalService = deps.approvalService;
 
@@ -128,6 +165,11 @@ export const createTmuxMobileServer = (
   let stopPromise: Promise<void> | null = null;
 
   const broadcastState = (state: TmuxStateSnapshot): void => {
+    verboseLog(
+      "broadcast tmux_state",
+      `authedControlClients=${[...controlClients].filter((client) => client.authed).length}`,
+      summarizeState(state)
+    );
     for (const client of controlClients) {
       if (client.authed) {
         sendJson(client.socket, { type: "tmux_state", state });
@@ -145,11 +187,15 @@ export const createTmuxMobileServer = (
 
     const runtime = new TerminalRuntime(deps.ptyFactory);
     runtime.on("data", (chunk) => {
+      verboseLog("runtime data chunk", context.clientId, `bytes=${Buffer.byteLength(chunk, "utf8")}`);
       for (const terminalClient of context.terminalClients) {
         if (terminalClient.authed && terminalClient.socket.readyState === terminalClient.socket.OPEN) {
           terminalClient.socket.send(chunk);
         }
       }
+    });
+    runtime.on("attach", (session) => {
+      verboseLog("runtime attached session", context.clientId, session);
     });
     runtime.on("exit", (code) => {
       logger.log(`tmux PTY exited with code ${code} (${context.clientId})`);
@@ -293,6 +339,13 @@ export const createTmuxMobileServer = (
           throw new Error("no attached session");
         }
         await deps.tmux.selectWindow(attachedSession, message.windowIndex);
+        if (message.stickyZoom === true) {
+          const panes = await deps.tmux.listPanes(attachedSession, message.windowIndex);
+          const activePane = panes.find((pane) => pane.active) ?? panes[0];
+          if (activePane && !(await deps.tmux.isPaneZoomed(activePane.id))) {
+            await deps.tmux.zoomPane(activePane.id);
+          }
+        }
         return;
       case "kill_window":
         if (!attachedSession) {
@@ -302,6 +355,9 @@ export const createTmuxMobileServer = (
         return;
       case "select_pane":
         await deps.tmux.selectPane(message.paneId);
+        if (message.stickyZoom === true && !(await deps.tmux.isPaneZoomed(message.paneId))) {
+          await deps.tmux.zoomPane(message.paneId);
+        }
         return;
       case "split_pane":
         await deps.tmux.splitWindow(message.paneId, message.orientation);
@@ -371,6 +427,7 @@ export const createTmuxMobileServer = (
         return;
       }
       logger.log("control ws message", context.clientId, message.type);
+      verboseLog("control ws payload", context.clientId, summarizeClientMessage(message));
 
       try {
         if (!context.authed) {
@@ -441,9 +498,13 @@ export const createTmuxMobileServer = (
         }
 
         try {
+          verboseLog("control mutation start", context.clientId, message.type);
           await runControlMutation(message, context);
+          verboseLog("control mutation done", context.clientId, message.type);
         } finally {
+          verboseLog("force publish start", context.clientId, message.type);
           await monitor?.forcePublish();
+          verboseLog("force publish done", context.clientId, message.type);
         }
       } catch (error) {
         logger.error("control ws error", context.clientId, error);
@@ -536,6 +597,15 @@ export const createTmuxMobileServer = (
       }
 
       if (isBinary) {
+        const binaryBytes =
+          typeof rawData === "string"
+            ? Buffer.byteLength(rawData, "utf8")
+            : rawData instanceof ArrayBuffer
+              ? rawData.byteLength
+              : Array.isArray(rawData)
+                ? rawData.reduce((sum, chunk) => sum + chunk.length, 0)
+                : rawData.length;
+        verboseLog("terminal ws binary input", `bytes=${binaryBytes}`);
         ctx.controlContext?.runtime?.write(rawData.toString());
         return;
       }
@@ -551,6 +621,7 @@ export const createTmuxMobileServer = (
             typeof payload.rows === "number"
           ) {
             ctx.controlContext?.runtime?.resize(payload.cols, payload.rows);
+            verboseLog("terminal ws resize", `${payload.cols}x${payload.rows}`);
             return;
           }
         } catch {
@@ -559,6 +630,7 @@ export const createTmuxMobileServer = (
       }
 
       ctx.controlContext?.runtime?.write(text);
+      verboseLog("terminal ws text input", `bytes=${Buffer.byteLength(text, "utf8")}`);
     });
 
     socket.on("close", () => {
