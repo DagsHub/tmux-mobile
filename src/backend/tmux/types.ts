@@ -11,6 +11,7 @@ export interface TmuxGateway {
   listWindows(session: string): Promise<Omit<TmuxWindowState, "panes">[]>;
   listPanes(session: string, windowIndex: number): Promise<TmuxPaneState[]>;
   createSession(name: string): Promise<void>;
+  createGroupedSession(name: string, targetSession: string): Promise<void>;
   killSession(name: string): Promise<void>;
   switchClient(session: string): Promise<void>;
   newWindow(session: string): Promise<void>;
@@ -20,6 +21,7 @@ export interface TmuxGateway {
   killPane(paneId: string): Promise<void>;
   selectPane(paneId: string): Promise<void>;
   zoomPane(paneId: string): Promise<void>;
+  isPaneZoomed(paneId: string): Promise<boolean>;
   capturePane(paneId: string, lines: number): Promise<string>;
   renameSession(oldName: string, newName: string): Promise<void>;
   renameWindow(session: string, windowIndex: number, newName: string): Promise<void>;

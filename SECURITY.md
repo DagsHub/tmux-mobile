@@ -52,7 +52,9 @@ Current posture:
 4. Browser loads app and opens two sockets:
    - `/ws/control` for JSON control/state
    - `/ws/terminal` for terminal stream
-5. First message on each socket must be `{ type: "auth", token, password }`.
+5. First message on each socket must be auth:
+   - control socket: `{ type: "auth", token, password }`
+   - terminal socket: `{ type: "auth", token, password, clientId }` where `clientId` comes from control `auth_ok`
 6. After auth success, client can fully control the tmux session and read terminal output.
 
 ## Authentication And Authorization
@@ -79,6 +81,8 @@ Current posture:
 - All-or-nothing.
 - Once authenticated, client can issue all control operations and terminal input.
 - No role separation (read-only vs control).
+- tmux-mobile creates a dedicated grouped tmux session per authenticated control client to isolate window focus.
+- Pane focus inside the same shared window remains shared by tmux semantics.
 
 ## Credential Lifecycle And Storage
 

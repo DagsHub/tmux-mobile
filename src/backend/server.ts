@@ -20,11 +20,17 @@ interface ControlContext {
   socket: WebSocket;
   authed: boolean;
   clientId: string;
+  runtime?: TerminalRuntime;
+  attachedSession?: string;
+  baseSession?: string;
+  terminalClients: Set<DataContext>;
 }
 
 interface DataContext {
   socket: WebSocket;
   authed: boolean;
+  controlClientId?: string;
+  controlContext?: ControlContext;
 }
 
 export interface ServerDependencies {
@@ -66,11 +72,54 @@ const sendJson = (socket: WebSocket, payload: ControlServerMessage): void => {
   }
 };
 
+const summarizeClientMessage = (message: ControlClientMessage): string => {
+  if (message.type === "auth") {
+    return JSON.stringify({
+      type: message.type,
+      tokenPresent: Boolean(message.token),
+      passwordPresent: Boolean(message.password),
+      clientIdPresent: Boolean(message.clientId)
+    });
+  }
+  if (message.type === "send_compose") {
+    return JSON.stringify({
+      type: message.type,
+      textLength: message.text.length
+    });
+  }
+  return JSON.stringify({ type: message.type });
+};
+
+const summarizeState = (state: TmuxStateSnapshot): string => {
+  const sessions = state.sessions.map((session) => {
+    const activeWindow =
+      session.windowStates.find((windowState) => windowState.active) ?? session.windowStates[0];
+    const activePane = activeWindow?.panes.find((pane) => pane.active) ?? activeWindow?.panes[0];
+    return `${session.name}[attached=${session.attached}]` +
+      `{window=${activeWindow ? `${activeWindow.index}:${activeWindow.name}` : "none"},` +
+      `pane=${activePane ? `${activePane.id}:zoom=${activePane.zoomed}` : "none"},` +
+      `windows=${session.windowStates.length}}`;
+  });
+  return `capturedAt=${state.capturedAt}; sessions=${sessions.join(" | ")}`;
+};
+
+const MOBILE_SESSION_PREFIX = "tmux-mobile-client-";
+
+const isManagedMobileSession = (name: string): boolean => name.startsWith(MOBILE_SESSION_PREFIX);
+
+const buildMobileSessionName = (clientId: string): string => `${MOBILE_SESSION_PREFIX}${clientId}`;
+
 export const createTmuxMobileServer = (
   config: RuntimeConfig,
   deps: ServerDependencies
 ): RunningServer => {
   const logger = deps.logger ?? console;
+  const verboseDebug = process.env.TMUX_MOBILE_VERBOSE_DEBUG === "1";
+  const verboseLog = (...args: unknown[]): void => {
+    if (verboseDebug) {
+      logger.log(...args);
+    }
+  };
   const authService = deps.authService ?? new AuthService(config.password, config.token);
 
   const app = express();
@@ -104,27 +153,16 @@ export const createTmuxMobileServer = (
   const controlClients = new Set<ControlContext>();
   const terminalClients = new Set<DataContext>();
 
-  const runtime = new TerminalRuntime(deps.ptyFactory);
   let monitor: TmuxStateMonitor | undefined;
   let started = false;
   let stopPromise: Promise<void> | null = null;
 
-  runtime.on("data", (chunk) => {
-    for (const client of terminalClients) {
-      if (client.authed && client.socket.readyState === client.socket.OPEN) {
-        client.socket.send(chunk);
-      }
-    }
-  });
-
-  runtime.on("exit", (code) => {
-    logger.log(`tmux PTY exited with code ${code}`);
-    for (const client of controlClients) {
-      sendJson(client.socket, { type: "info", message: "tmux client exited" });
-    }
-  });
-
   const broadcastState = (state: TmuxStateSnapshot): void => {
+    verboseLog(
+      "broadcast tmux_state",
+      `authedControlClients=${[...controlClients].filter((client) => client.authed).length}`,
+      summarizeState(state)
+    );
     for (const client of controlClients) {
       if (client.authed) {
         sendJson(client.socket, { type: "tmux_state", state });
@@ -132,18 +170,70 @@ export const createTmuxMobileServer = (
     }
   };
 
+  const getControlContext = (clientId: string): ControlContext | undefined =>
+    Array.from(controlClients).find((candidate) => candidate.clientId === clientId);
+
+  const getOrCreateRuntime = (context: ControlContext): TerminalRuntime => {
+    if (context.runtime) {
+      return context.runtime;
+    }
+
+    const runtime = new TerminalRuntime(deps.ptyFactory);
+    runtime.on("data", (chunk) => {
+      verboseLog("runtime data chunk", context.clientId, `bytes=${Buffer.byteLength(chunk, "utf8")}`);
+      for (const terminalClient of context.terminalClients) {
+        if (terminalClient.authed && terminalClient.socket.readyState === terminalClient.socket.OPEN) {
+          terminalClient.socket.send(chunk);
+        }
+      }
+    });
+    runtime.on("attach", (session) => {
+      verboseLog("runtime attached session", context.clientId, session);
+    });
+    runtime.on("exit", (code) => {
+      logger.log(`tmux PTY exited with code ${code} (${context.clientId})`);
+      sendJson(context.socket, { type: "info", message: "tmux client exited" });
+    });
+    context.runtime = runtime;
+    return runtime;
+  };
+
+  const attachControlToBaseSession = async (
+    context: ControlContext,
+    baseSession: string
+  ): Promise<void> => {
+    const runtime = getOrCreateRuntime(context);
+    const mobileSession = buildMobileSessionName(context.clientId);
+    const sessions = await deps.tmux.listSessions();
+    const hasMobileSession = sessions.some((session) => session.name === mobileSession);
+    const needsRecreate = hasMobileSession && context.baseSession && context.baseSession !== baseSession;
+
+    if (needsRecreate) {
+      await deps.tmux.killSession(mobileSession);
+    }
+    if (!hasMobileSession || needsRecreate) {
+      await deps.tmux.createGroupedSession(mobileSession, baseSession);
+    }
+
+    context.baseSession = baseSession;
+    context.attachedSession = mobileSession;
+    runtime.attachToSession(mobileSession);
+    sendJson(context.socket, { type: "attached", session: mobileSession });
+  };
+
   const ensureAttachedSession = async (
-    socket: WebSocket,
+    context: ControlContext,
     forceSession?: string
   ): Promise<void> => {
     if (forceSession) {
       logger.log("attach session (forced)", forceSession);
-      runtime.attachToSession(forceSession);
-      sendJson(socket, { type: "attached", session: forceSession });
+      await attachControlToBaseSession(context, forceSession);
       return;
     }
 
-    const sessions = await deps.tmux.listSessions();
+    const sessions = (await deps.tmux.listSessions()).filter(
+      (session) => !isManagedMobileSession(session.name)
+    );
     logger.log(
       "sessions discovered",
       sessions.map((session) => `${session.name}:${session.attached ? "attached" : "detached"}`).join(",")
@@ -151,47 +241,63 @@ export const createTmuxMobileServer = (
     if (sessions.length === 0) {
       await deps.tmux.createSession(config.defaultSession);
       logger.log("created default session", config.defaultSession);
-      runtime.attachToSession(config.defaultSession);
-      sendJson(socket, { type: "attached", session: config.defaultSession });
+      await attachControlToBaseSession(context, config.defaultSession);
       return;
     }
 
     if (sessions.length === 1) {
       logger.log("attach only session", sessions[0].name);
-      runtime.attachToSession(sessions[0].name);
-      sendJson(socket, { type: "attached", session: sessions[0].name });
+      await attachControlToBaseSession(context, sessions[0].name);
       return;
     }
 
     logger.log("show session picker", sessions.length);
-    sendJson(socket, { type: "session_picker", sessions });
+    sendJson(context.socket, { type: "session_picker", sessions });
   };
 
   const runControlMutation = async (
     message: ControlClientMessage,
-    socket: WebSocket
+    context: ControlContext
   ): Promise<void> => {
+    const attachedSession = context.attachedSession;
     switch (message.type) {
       case "select_session":
-        runtime.attachToSession(message.session);
-        sendJson(socket, { type: "attached", session: message.session });
+        await attachControlToBaseSession(context, message.session);
         return;
       case "new_session":
         await deps.tmux.createSession(message.name);
-        runtime.attachToSession(message.name);
-        sendJson(socket, { type: "attached", session: message.name });
+        await attachControlToBaseSession(context, message.name);
         return;
       case "new_window":
-        await deps.tmux.newWindow(message.session);
+        if (!attachedSession) {
+          throw new Error("no attached session");
+        }
+        await deps.tmux.newWindow(attachedSession);
         return;
       case "select_window":
-        await deps.tmux.selectWindow(message.session, message.windowIndex);
+        if (!attachedSession) {
+          throw new Error("no attached session");
+        }
+        await deps.tmux.selectWindow(attachedSession, message.windowIndex);
+        if (message.stickyZoom === true) {
+          const panes = await deps.tmux.listPanes(attachedSession, message.windowIndex);
+          const activePane = panes.find((pane) => pane.active) ?? panes[0];
+          if (activePane && !(await deps.tmux.isPaneZoomed(activePane.id))) {
+            await deps.tmux.zoomPane(activePane.id);
+          }
+        }
         return;
       case "kill_window":
-        await deps.tmux.killWindow(message.session, message.windowIndex);
+        if (!attachedSession) {
+          throw new Error("no attached session");
+        }
+        await deps.tmux.killWindow(attachedSession, message.windowIndex);
         return;
       case "select_pane":
         await deps.tmux.selectPane(message.paneId);
+        if (message.stickyZoom === true && !(await deps.tmux.isPaneZoomed(message.paneId))) {
+          await deps.tmux.zoomPane(message.paneId);
+        }
         return;
       case "split_pane":
         await deps.tmux.splitWindow(message.paneId, message.orientation);
@@ -205,7 +311,7 @@ export const createTmuxMobileServer = (
       case "capture_scrollback": {
         const lines = message.lines ?? config.scrollbackLines;
         const output = await deps.tmux.capturePane(message.paneId, lines);
-        sendJson(socket, {
+        sendJson(context.socket, {
           type: "scrollback",
           paneId: message.paneId,
           lines,
@@ -214,7 +320,7 @@ export const createTmuxMobileServer = (
         return;
       }
       case "send_compose":
-        runtime.write(`${message.text}\r`);
+        context.runtime?.write(`${message.text}\r`);
         return;
       case "rename_session":
         await deps.tmux.renameSession(message.session, message.newName);
@@ -224,7 +330,7 @@ export const createTmuxMobileServer = (
         return;
       case "kill_session": {
         await deps.tmux.killSession(message.session);
-        await ensureAttachedSession(socket);
+        await ensureAttachedSession(context);
         return;
       }
       case "respawn_pane":
@@ -255,11 +361,31 @@ export const createTmuxMobileServer = (
     }
   };
 
-  controlWss.on("connection", (socket, request) => {
+  const shutdownControlContext = async (context: ControlContext): Promise<void> => {
+    for (const terminalClient of context.terminalClients) {
+      if (terminalClient.socket.readyState === terminalClient.socket.OPEN) {
+        terminalClient.socket.close();
+      }
+    }
+    context.terminalClients.clear();
+    context.runtime?.shutdown();
+    context.runtime = undefined;
+    if (context.attachedSession) {
+      try {
+        await deps.tmux.killSession(context.attachedSession);
+      } catch (error) {
+        logger.error("failed to cleanup mobile session", context.attachedSession, error);
+      }
+      context.attachedSession = undefined;
+    }
+  };
+
+  controlWss.on("connection", (socket) => {
     const context: ControlContext = {
       socket,
       authed: false,
-      clientId: randomToken(12)
+      clientId: randomToken(12),
+      terminalClients: new Set<DataContext>()
     };
     controlClients.add(context);
     logger.log("control ws connected", context.clientId);
@@ -271,6 +397,7 @@ export const createTmuxMobileServer = (
         return;
       }
       logger.log("control ws message", context.clientId, message.type);
+      verboseLog("control ws payload", context.clientId, summarizeClientMessage(message));
 
       try {
         if (!context.authed) {
@@ -300,7 +427,7 @@ export const createTmuxMobileServer = (
             requiresPassword: authService.requiresPassword()
           });
           try {
-            await ensureAttachedSession(socket);
+            await ensureAttachedSession(context);
           } catch (error) {
             logger.error("initial attach failed", error);
             sendJson(socket, {
@@ -313,9 +440,13 @@ export const createTmuxMobileServer = (
         }
 
         try {
-          await runControlMutation(message, socket);
+          verboseLog("control mutation start", context.clientId, message.type);
+          await runControlMutation(message, context);
+          verboseLog("control mutation done", context.clientId, message.type);
         } finally {
+          verboseLog("force publish start", context.clientId, message.type);
           await monitor?.forcePublish();
+          verboseLog("force publish done", context.clientId, message.type);
         }
       } catch (error) {
         logger.error("control ws error", context.clientId, error);
@@ -328,11 +459,12 @@ export const createTmuxMobileServer = (
 
     socket.on("close", () => {
       controlClients.delete(context);
+      void shutdownControlContext(context);
       logger.log("control ws closed", context.clientId);
     });
   });
 
-  terminalWss.on("connection", (socket, request) => {
+  terminalWss.on("connection", (socket) => {
     const ctx: DataContext = { socket, authed: false };
     terminalClients.add(ctx);
     logger.log("terminal ws connected");
@@ -349,6 +481,11 @@ export const createTmuxMobileServer = (
           socket.close(4001, "auth required");
           return;
         }
+        const clientId = authMessage.clientId;
+        if (!clientId) {
+          socket.close(4001, "unauthorized");
+          return;
+        }
 
         const authResult = authService.verify({
           token: authMessage.token,
@@ -359,14 +496,31 @@ export const createTmuxMobileServer = (
           socket.close(4001, "unauthorized");
           return;
         }
+        const controlContext = getControlContext(clientId);
+        if (!controlContext || !controlContext.authed) {
+          socket.close(4001, "unauthorized");
+          return;
+        }
 
         ctx.authed = true;
+        ctx.controlClientId = clientId;
+        ctx.controlContext = controlContext;
+        controlContext.terminalClients.add(ctx);
         logger.log("terminal ws auth ok");
         return;
       }
 
       if (isBinary) {
-        runtime.write(rawData.toString());
+        const binaryBytes =
+          typeof rawData === "string"
+            ? Buffer.byteLength(rawData, "utf8")
+            : rawData instanceof ArrayBuffer
+              ? rawData.byteLength
+              : Array.isArray(rawData)
+                ? rawData.reduce((sum, chunk) => sum + chunk.length, 0)
+                : rawData.length;
+        verboseLog("terminal ws binary input", `bytes=${binaryBytes}`);
+        ctx.controlContext?.runtime?.write(rawData.toString());
         return;
       }
 
@@ -380,7 +534,8 @@ export const createTmuxMobileServer = (
             typeof payload.cols === "number" &&
             typeof payload.rows === "number"
           ) {
-            runtime.resize(payload.cols, payload.rows);
+            ctx.controlContext?.runtime?.resize(payload.cols, payload.rows);
+            verboseLog("terminal ws resize", `${payload.cols}x${payload.rows}`);
             return;
           }
         } catch {
@@ -388,11 +543,13 @@ export const createTmuxMobileServer = (
         }
       }
 
-      runtime.write(text);
+      ctx.controlContext?.runtime?.write(text);
+      verboseLog("terminal ws text input", `bytes=${Buffer.byteLength(text, "utf8")}`);
     });
 
     socket.on("close", () => {
       terminalClients.delete(ctx);
+      ctx.controlContext?.terminalClients.delete(ctx);
       logger.log("terminal ws closed");
     });
   });
@@ -457,21 +614,21 @@ export const createTmuxMobileServer = (
       }
 
       stopPromise = (async () => {
-      logger.log("server shutdown begin");
-      monitor?.stop();
-      runtime.shutdown();
-      controlWss.close();
-      terminalWss.close();
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
+        logger.log("server shutdown begin");
+        monitor?.stop();
+        await Promise.all(Array.from(controlClients).map((context) => shutdownControlContext(context)));
+        controlWss.close();
+        terminalWss.close();
+        await new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve();
+          });
         });
-      });
-      logger.log("server shutdown complete");
+        logger.log("server shutdown complete");
       })();
 
       try {

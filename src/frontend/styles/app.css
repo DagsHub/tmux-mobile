@@ -413,6 +413,31 @@ input {
   border-color: var(--status-pending-border);
 }
 
+.top-zoom-indicator {
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.top-zoom-indicator:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.top-zoom-indicator.on {
+  border-color: var(--border-active);
+  background: var(--accent-glow);
+}
+
 .terminal-wrap {
   min-height: 0;
   padding: 0.3rem;
@@ -655,6 +680,30 @@ li:has(.kebab-dropdown) .kebab-btn {
 
 .kebab-dropdown {
   padding: 0.25rem 0;
+}
+
+.pane-zoom-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.4rem;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+  border: 1px solid var(--btn-border);
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.08);
+  font-size: 0.72rem;
+  line-height: 1;
+  vertical-align: text-bottom;
+}
+
+.pane-zoom-indicator.on {
+  color: var(--accent);
+  border-color: var(--border-active);
+  background: var(--accent-glow);
+}
+.drawer-grid {
   display: grid;
   gap: 0.2rem;
 }

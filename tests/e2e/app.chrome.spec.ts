@@ -115,7 +115,9 @@ test.describe("tmux-mobile browser behavior", () => {
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
       await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
 
-      await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("work");
+      await expect
+        .poll(() => server.ptyFactory.lastSpawnedSession?.startsWith("tmux-mobile-client-") ?? false)
+        .toBe(true);
     });
   });
 
@@ -171,6 +173,280 @@ test.describe("tmux-mobile browser behavior", () => {
     });
   });
 
+  test.describe("sticky zoom toggle", () => {
+    let server: StartedE2EServer;
+
+    test.beforeAll(async () => {
+      server = await startE2EServer({ sessions: ["main"], defaultSession: "main" });
+    });
+
+    test.afterAll(async () => {
+      await server.stop();
+    });
+
+    test("defaults off on wide screens and toggles sticky zoom state", async ({ page }) => {
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+
+      // Open drawer
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+
+      // Verify sticky zoom toggle exists and is off by default
+      const toggle = page.getByTestId("sticky-zoom-toggle");
+      await expect(toggle).toBeVisible();
+      await expect(toggle).toContainText("Sticky Zoom: Off");
+
+      // Turn on sticky zoom
+      await toggle.click();
+      await expect(toggle).toContainText("Sticky Zoom: On");
+      await expect(toggle).toHaveClass(/active/);
+
+      // Turn off sticky zoom
+      await toggle.click();
+      await expect(toggle).toContainText("Sticky Zoom: Off");
+      await expect(toggle).not.toHaveClass(/active/);
+    });
+
+    test("defaults on for narrow screens when no sticky zoom preference is stored", async ({ page }) => {
+      await page.addInitScript(() => {
+        localStorage.removeItem("tmux-mobile-sticky-zoom");
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.getByTestId("sticky-zoom-toggle")).toContainText("Sticky Zoom: On");
+      await expect(page.getByTestId("sticky-zoom-toggle")).toHaveClass(/active/);
+    });
+
+    test("sticky zoom state persists across page reloads", async ({ page }) => {
+      // Set sticky zoom on via localStorage
+      await page.addInitScript(() => {
+        localStorage.setItem("tmux-mobile-sticky-zoom", "true");
+      });
+
+      await page.goto(`${server.baseUrl}/?token=${server.token}`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+
+      // Open drawer and verify sticky zoom is on
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.getByTestId("sticky-zoom-toggle")).toContainText("Sticky Zoom: On");
+    });
+
+    test("applies sticky zoom when switching windows", async ({ page }) => {
+      const localServer = await startE2EServer({ sessions: ["main"], defaultSession: "main" });
+      try {
+        await localServer.tmux.newWindow("main");
+        await localServer.tmux.selectWindow("main", 0);
+
+        await page.goto(`${localServer.baseUrl}/?token=${localServer.token}`);
+        await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+        await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
+
+        await page.getByTestId("drawer-toggle").click();
+        const stickyZoomToggle = page.getByTestId("sticky-zoom-toggle");
+        await expect(stickyZoomToggle).toContainText("Sticky Zoom: Off");
+        await stickyZoomToggle.click();
+        await expect(stickyZoomToggle).toContainText("Sticky Zoom: On");
+
+        const initialZoomCalls = localServer.tmux.calls.filter((call) =>
+          call.startsWith("zoomPane:")
+        ).length;
+        await page.getByTestId("windows-list").getByRole("button", { name: /^1:\s/ }).click();
+
+        await expect
+          .poll(() => localServer.tmux.calls.filter((call) => call.startsWith("zoomPane:")).length)
+          .toBe(initialZoomCalls + 1);
+        await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: on");
+        await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
+          "aria-label",
+          "Pane zoom: on"
+        );
+      } finally {
+        await page.goto("about:blank");
+        await localServer.stop();
+      }
+    });
+
+    test("shows zoom indicators for active pane in drawer and top bar", async ({ page }, testInfo) => {
+      const frontendConsole: Array<{
+        at: string;
+        type: string;
+        text: string;
+      }> = [];
+      page.on("console", (message) => {
+        const entry = {
+          at: new Date().toISOString(),
+          type: message.type(),
+          text: message.text()
+        };
+        frontendConsole.push(entry);
+        if (frontendConsole.length > 500) {
+          frontendConsole.splice(0, frontendConsole.length - 500);
+        }
+        console.log(`[frontend-console:${entry.type}] ${entry.text}`);
+      });
+      page.on("pageerror", (error) => {
+        const entry = {
+          at: new Date().toISOString(),
+          type: "pageerror",
+          text: error.message
+        };
+        frontendConsole.push(entry);
+        console.error(`[frontend-pageerror] ${error.message}`);
+      });
+
+      const collectZoomDebug = async (phase: string, options?: { attach?: boolean }): Promise<void> => {
+        const topIndicator = page.getByTestId("top-zoom-indicator");
+        const activePaneIndicator = page.getByTestId("active-pane-zoom-indicator");
+        const paneButtons = page.getByRole("button", { name: /^%\d+:/ });
+        const sessionsListButtons = page.getByTestId("sessions-list").getByRole("button");
+
+        const topIndicatorSnapshot = await topIndicator.evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            ariaLabel: node.getAttribute("aria-label"),
+            title: node.getAttribute("title"),
+            text: node.textContent
+          }))
+        );
+        const activePaneIndicatorSnapshot = await activePaneIndicator.evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            ariaLabel: node.getAttribute("aria-label"),
+            title: node.getAttribute("title"),
+            text: node.textContent
+          }))
+        );
+        const paneButtonLabels = await paneButtons.evaluateAll((buttons) =>
+          buttons.map((button) => button.textContent?.trim() ?? "")
+        );
+        const sessionButtons = await sessionsListButtons.evaluateAll((buttons) =>
+          buttons.map((button) => ({
+            text: button.textContent?.trim() ?? "",
+            className: (button as HTMLElement).className
+          }))
+        );
+
+        const browserDebug = await page.evaluate(() => {
+          const debugWindow = window as Window & {
+            __tmuxMobileDebugState?: unknown;
+            __tmuxMobileDebugEvents?: unknown[];
+          };
+          return {
+            state: debugWindow.__tmuxMobileDebugState ?? null,
+            events: (debugWindow.__tmuxMobileDebugEvents ?? []).slice(-200)
+          };
+        });
+
+        let tmuxPanes: unknown = null;
+        let tmuxPanesError: string | null = null;
+        try {
+          tmuxPanes = await server.tmux.listPanes("main", 0);
+        } catch (error) {
+          tmuxPanesError = error instanceof Error ? error.message : String(error);
+        }
+
+        const debug = {
+          phase,
+          topZoomIndicator: {
+            count: topIndicatorSnapshot.length,
+            ...(topIndicatorSnapshot[0] ?? {})
+          },
+          activePaneZoomIndicator: {
+            count: activePaneIndicatorSnapshot.length,
+            ...(activePaneIndicatorSnapshot[0] ?? {})
+          },
+          paneButtons: {
+            count: paneButtonLabels.length,
+            labels: paneButtonLabels
+          },
+          topTitleText: await page.locator(".top-title").textContent(),
+          sessionButtons,
+          frontendConsole: frontendConsole.slice(-200),
+          browserDebug,
+          zoomCalls: server.tmux.calls.filter((call) => call.startsWith("zoomPane:")),
+          recentTmuxCalls: server.tmux.calls.slice(-120),
+          tmuxPanes,
+          tmuxPanesError
+        };
+
+        const payload = JSON.stringify(debug, null, 2);
+        console.error(`[sticky-zoom-debug] ${payload}`);
+        if (options?.attach) {
+          await testInfo.attach(`sticky-zoom-${phase}`, {
+            body: payload,
+            contentType: "application/json"
+          });
+        }
+      };
+
+      const expectZoomIndicators = async (expected: "on" | "off", phase: string): Promise<void> => {
+        const expectedAriaLabel = `Pane zoom: ${expected}`;
+        try {
+          await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute(
+            "aria-label",
+            expectedAriaLabel
+          );
+          if (expected === "on") {
+            await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveAttribute(
+              "aria-label",
+              expectedAriaLabel
+            );
+          } else {
+            await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveCount(0);
+          }
+        } catch (error) {
+          await collectZoomDebug(phase, { attach: true });
+          throw error;
+        }
+      };
+
+      const initialPanes = await server.tmux.listPanes("main", 0);
+      await server.tmux.splitWindow(initialPanes[0].id, "h");
+
+      await page.goto(`${server.baseUrl}/?token=${server.token}&debug=1`);
+      await expect(page.getByTestId("top-status-indicator")).toHaveClass(/ok/);
+      await expect(page.getByTestId("top-zoom-indicator")).toHaveAttribute("aria-label", "Pane zoom: off");
+      await collectZoomDebug("after-load");
+
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+      const mainSessionButton = page
+        .getByTestId("sessions-list")
+        .getByRole("button", { name: /^main\b/ });
+      await expect(mainSessionButton).toBeVisible();
+      await mainSessionButton.click();
+      await expect(page.locator(".drawer")).toHaveCount(0);
+      await collectZoomDebug("after-select-main");
+
+      // Re-open drawer after explicit attach to pin UI state to "main".
+      await page.getByTestId("drawer-toggle").click();
+      await expect(page.locator(".drawer")).toBeVisible();
+      await expect(page.getByTestId("active-pane-zoom-indicator")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^%\d+:/ })).toHaveCount(2);
+
+      const zoomButton = page.getByRole("button", { name: "Zoom Pane" });
+      await expect(zoomButton).toBeEnabled();
+      const initialZoomCalls = server.tmux.calls.filter((call) => call.startsWith("zoomPane:")).length;
+      await zoomButton.click();
+      await expect
+        .poll(() => server.tmux.calls.filter((call) => call.startsWith("zoomPane:")).length)
+        .toBe(initialZoomCalls + 1);
+      await collectZoomDebug("after-first-zoom-call");
+      await expectZoomIndicators("on", "after-first-zoom");
+      await collectZoomDebug("after-first-zoom-assert");
+
+      await zoomButton.click();
+      await expect
+        .poll(() => server.tmux.calls.filter((call) => call.startsWith("zoomPane:")).length)
+        .toBe(initialZoomCalls + 2);
+      await collectZoomDebug("after-second-zoom-call");
+      await expectZoomIndicators("off", "after-second-zoom");
+      await collectZoomDebug("after-second-zoom-assert");
+    });
+  });
+
   test.describe("session picker fallback when switch-client fails", () => {
     let server: StartedE2EServer;
 
@@ -194,7 +470,9 @@ test.describe("tmux-mobile browser behavior", () => {
 
       await expect(page.getByTestId("session-picker-overlay")).toHaveCount(0);
       await expect(page.locator(".top-title")).toContainText("Window: 0: shell");
-      await expect.poll(() => server.ptyFactory.lastSpawnedSession).toBe("dev");
+      await expect
+        .poll(() => server.ptyFactory.lastSpawnedSession?.startsWith("tmux-mobile-client-") ?? false)
+        .toBe(true);
     });
   });
 });

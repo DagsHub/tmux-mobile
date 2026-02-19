@@ -1,11 +1,11 @@
 export type ControlClientMessage =
-  | { type: "auth"; token?: string; password?: string }
+  | { type: "auth"; token?: string; password?: string; clientId?: string }
   | { type: "select_session"; session: string }
   | { type: "new_session"; name: string }
   | { type: "new_window"; session: string }
-  | { type: "select_window"; session: string; windowIndex: number }
+  | { type: "select_window"; session: string; windowIndex: number; stickyZoom?: boolean }
   | { type: "kill_window"; session: string; windowIndex: number }
-  | { type: "select_pane"; paneId: string }
+  | { type: "select_pane"; paneId: string; stickyZoom?: boolean }
   | { type: "split_pane"; paneId: string; orientation: "h" | "v" }
   | { type: "kill_pane"; paneId: string }
   | { type: "zoom_pane"; paneId: string }
@@ -33,6 +33,7 @@ export interface TmuxPaneState {
   active: boolean;
   width: number;
   height: number;
+  zoomed: boolean;
 }
 
 export interface TmuxWindowState {
