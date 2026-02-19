@@ -19,7 +19,12 @@ export const createLogger = (
   logFilePath: string | undefined
 ): Pick<Console, "log" | "error"> => {
   if (!logFilePath) {
-    return console;
+    return {
+      log: () => undefined,
+      error: (...values: unknown[]) => {
+        console.error(...values);
+      }
+    };
   }
 
   const resolvedPath = path.resolve(logFilePath);
