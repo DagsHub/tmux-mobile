@@ -340,6 +340,27 @@ describe("tmux mobile server", () => {
     control.close();
   });
 
+  test("select_window with stickyZoom zooms the target window active pane", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    const { attachedSession } = await authControl(control);
+
+    control.send(JSON.stringify({ type: "new_window", session: attachedSession }));
+    await waitForTmuxCall((call) => call === `newWindow:${attachedSession}`);
+
+    tmux.calls.length = 0;
+
+    control.send(JSON.stringify({ type: "select_window", session: attachedSession, windowIndex: 0, stickyZoom: true }));
+    await waitForTmuxCall((call) => call === `selectWindow:${attachedSession}:0`);
+
+    expect(tmux.calls).toContain(`selectWindow:${attachedSession}:0`);
+    expect(tmux.calls.some((call) => call.startsWith("zoomPane:"))).toBe(true);
+
+    control.close();
+  });
+
   test("stop is idempotent when called repeatedly", async () => {
     await runningServer.stop();
     await runningServer.stop();

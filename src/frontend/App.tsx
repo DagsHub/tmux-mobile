@@ -612,6 +612,18 @@ export const App = () => {
     terminalRef.current?.focus();
   };
 
+  const selectWindow = (windowState: TmuxWindowState): void => {
+    if (!activeSession) {
+      return;
+    }
+    sendControl({
+      type: "select_window",
+      session: activeSession.name,
+      windowIndex: windowState.index,
+      ...(stickyZoom && !windowState.active ? { stickyZoom: true } : {})
+    });
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -809,13 +821,7 @@ export const App = () => {
                 ? activeSession.windowStates.map((windowState) => (
                     <li key={`${activeSession.name}-${windowState.index}`}>
                       <button
-                        onClick={() =>
-                          sendControl({
-                            type: "select_window",
-                            session: activeSession.name,
-                            windowIndex: windowState.index
-                          })
-                        }
+                        onClick={() => selectWindow(windowState)}
                         className={windowState.active ? "active" : ""}
                       >
                         {windowState.index}: {windowState.name} {windowState.active ? "*" : ""}
@@ -849,11 +855,11 @@ export const App = () => {
                         className={pane.active ? "active" : ""}
                       >
                         %{pane.index}: {pane.currentCommand} {pane.active ? "*" : ""}
-                        {pane.active ? (
+                        {pane.active && pane.zoomed ? (
                           <span
-                            className={`pane-zoom-indicator${pane.zoomed ? " on" : ""}`}
-                            title={pane.zoomed ? "Active pane is zoomed" : "Active pane is not zoomed"}
-                            aria-label={`Pane zoom: ${pane.zoomed ? "on" : "off"}`}
+                            className="pane-zoom-indicator on"
+                            title="Active pane is zoomed"
+                            aria-label="Pane zoom: on"
                             data-testid="active-pane-zoom-indicator"
                           >
                             🔍

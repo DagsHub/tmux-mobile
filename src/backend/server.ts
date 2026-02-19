@@ -279,6 +279,13 @@ export const createTmuxMobileServer = (
           throw new Error("no attached session");
         }
         await deps.tmux.selectWindow(attachedSession, message.windowIndex);
+        if (message.stickyZoom === true) {
+          const panes = await deps.tmux.listPanes(attachedSession, message.windowIndex);
+          const activePane = panes.find((pane) => pane.active) ?? panes[0];
+          if (activePane && !(await deps.tmux.isPaneZoomed(activePane.id))) {
+            await deps.tmux.zoomPane(activePane.id);
+          }
+        }
         return;
       case "kill_window":
         if (!attachedSession) {

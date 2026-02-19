@@ -36,7 +36,7 @@ export type ControlClientMessage =
   | { type: "select_session"; session: string }
   | { type: "new_session"; name: string }
   | { type: "new_window"; session: string }
-  | { type: "select_window"; session: string; windowIndex: number }
+  | { type: "select_window"; session: string; windowIndex: number; stickyZoom?: boolean }
   | { type: "kill_window"; session: string; windowIndex: number }
   | { type: "select_pane"; paneId: string; stickyZoom?: boolean }
   | { type: "split_pane"; paneId: string; orientation: "h" | "v" }
