@@ -63,7 +63,9 @@ export const startE2EServer = async (
     scrollbackLines: 1000,
     pollIntervalMs: 100,
     token,
-    frontendDir: path.resolve(process.cwd(), "dist/frontend")
+    frontendDir: path.resolve(process.cwd(), "dist/frontend"),
+    approvalEnabled: false,
+    jwtLifetimeSecs: 86400
   };
 
   const server: RunningServer = createTmuxMobileServer(config, {

@@ -11,6 +11,8 @@ import type {
 } from "./types/protocol.js";
 import { randomToken } from "./util/random.js";
 import { AuthService } from "./auth/auth-service.js";
+import type { ApprovalService } from "./auth/approval-service.js";
+import { resolveGeo } from "./util/geoip.js";
 import type { TmuxGateway } from "./tmux/types.js";
 import { TerminalRuntime } from "./pty/terminal-runtime.js";
 import type { PtyFactory } from "./pty/pty-adapter.js";
@@ -24,6 +26,7 @@ interface ControlContext {
   attachedSession?: string;
   baseSession?: string;
   terminalClients: Set<DataContext>;
+  pendingApprovalId?: string;
 }
 
 interface DataContext {
@@ -31,12 +34,14 @@ interface DataContext {
   authed: boolean;
   controlClientId?: string;
   controlContext?: ControlContext;
+  authInProgress: boolean;
 }
 
 export interface ServerDependencies {
   tmux: TmuxGateway;
   ptyFactory: PtyFactory;
   authService?: AuthService;
+  approvalService?: ApprovalService;
   logger?: Pick<Console, "log" | "error">;
 }
 
@@ -121,6 +126,7 @@ export const createTmuxMobileServer = (
     }
   };
   const authService = deps.authService ?? new AuthService(config.password, config.token);
+  const approvalService = deps.approvalService;
 
   const app = express();
   app.use(express.json());
@@ -129,7 +135,8 @@ export const createTmuxMobileServer = (
     res.json({
       passwordRequired: authService.requiresPassword(),
       scrollbackLines: config.scrollbackLines,
-      pollIntervalMs: config.pollIntervalMs
+      pollIntervalMs: config.pollIntervalMs,
+      approvalEnabled: config.approvalEnabled
     });
   });
 
@@ -255,6 +262,59 @@ export const createTmuxMobileServer = (
     sendJson(context.socket, { type: "session_picker", sessions });
   };
 
+  const completeAuth = async (context: ControlContext, jwt?: string): Promise<void> => {
+    context.authed = true;
+    logger.log("control ws auth ok", context.clientId);
+
+    if (jwt) {
+      sendJson(context.socket, {
+        type: "auth_approved",
+        jwt,
+        clientId: context.clientId
+      });
+    } else {
+      sendJson(context.socket, {
+        type: "auth_ok",
+        clientId: context.clientId,
+        requiresPassword: authService.requiresPassword()
+      });
+    }
+
+    try {
+      await ensureAttachedSession(context);
+    } catch (error) {
+      logger.error("initial attach failed", error);
+      sendJson(context.socket, {
+        type: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    await monitor?.forcePublish();
+  };
+
+  // Listen for approval/denial events from the TUI
+  if (approvalService) {
+    approvalService.on("approved", (event: { connectionId: string; jwt: string; clientId: string }) => {
+      for (const client of controlClients) {
+        if (client.pendingApprovalId === event.connectionId) {
+          client.pendingApprovalId = undefined;
+          void completeAuth(client, event.jwt);
+          break;
+        }
+      }
+    });
+
+    approvalService.on("denied", (event: { connectionId: string }) => {
+      for (const client of controlClients) {
+        if (client.pendingApprovalId === event.connectionId) {
+          client.pendingApprovalId = undefined;
+          sendJson(client.socket, { type: "auth_denied", reason: "connection denied by server operator" });
+          break;
+        }
+      }
+    });
+  }
+
   const runControlMutation = async (
     message: ControlClientMessage,
     context: ControlContext
@@ -350,7 +410,7 @@ export const createTmuxMobileServer = (
     }
   };
 
-  controlWss.on("connection", (socket) => {
+  controlWss.on("connection", (socket, request) => {
     const context: ControlContext = {
       socket,
       authed: false,
@@ -376,36 +436,64 @@ export const createTmuxMobileServer = (
             return;
           }
 
+          // 1. JWT authentication (if approvalService available and JWT provided)
+          if (message.jwt && approvalService) {
+            const jwtResult = await approvalService.verifyJwt(message.jwt);
+            if (jwtResult.valid) {
+              logger.log("control ws jwt auth ok", context.clientId);
+              const freshJwt = await approvalService.signJwt(context.clientId);
+              await completeAuth(context, freshJwt);
+              return;
+            }
+            logger.log("control ws jwt invalid", context.clientId, jwtResult.reason);
+            // JWT invalid — fall through to password check
+          }
+
+          // 2. Normal password/token verification
           const authResult = authService.verify({
             token: message.token,
             password: message.password
           });
-          if (!authResult.ok) {
-            logger.log("control ws auth failed", context.clientId, authResult.reason ?? "unknown");
-            sendJson(socket, {
-              type: "auth_error",
-              reason: authResult.reason ?? "unauthorized"
-            });
+
+          if (authResult.ok) {
+            // Password matched (or no password required) — issue JWT if approvalService exists
+            if (approvalService) {
+              const jwt = await approvalService.signJwt(context.clientId);
+              logger.log("control ws auth ok (issuing jwt)", context.clientId);
+              await completeAuth(context, jwt);
+            } else {
+              await completeAuth(context);
+            }
             return;
           }
 
-          context.authed = true;
-          logger.log("control ws auth ok", context.clientId);
-          sendJson(socket, {
-            type: "auth_ok",
-            clientId: context.clientId,
-            requiresPassword: authService.requiresPassword()
-          });
-          try {
-            await ensureAttachedSession(context);
-          } catch (error) {
-            logger.error("initial attach failed", error);
-            sendJson(socket, {
-              type: "error",
-              message: error instanceof Error ? error.message : String(error)
+          // 3. Invalid password + approval service → enter pending approval
+          if (authResult.reason === "invalid password" && approvalService) {
+            const ip = (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+              ?? request.socket.remoteAddress
+              ?? "unknown";
+            const userAgent = request.headers["user-agent"] ?? "unknown";
+            const geoLocation = resolveGeo(ip);
+
+            const pending = approvalService.addPending({
+              clientId: context.clientId,
+              socket,
+              ip,
+              userAgent,
+              geoLocation
             });
+            context.pendingApprovalId = pending.id;
+            logger.log("control ws pending approval", context.clientId, pending.challengeCode);
+            sendJson(socket, { type: "auth_pending", challengeCode: pending.challengeCode });
+            return;
           }
-          await monitor?.forcePublish();
+
+          // 4. Normal auth failure
+          logger.log("control ws auth failed", context.clientId, authResult.reason ?? "unknown");
+          sendJson(socket, {
+            type: "auth_error",
+            reason: authResult.reason ?? "unauthorized"
+          });
           return;
         }
 
@@ -428,19 +516,27 @@ export const createTmuxMobileServer = (
     });
 
     socket.on("close", () => {
+      if (context.pendingApprovalId && approvalService) {
+        approvalService.removePending(context.pendingApprovalId);
+      }
       controlClients.delete(context);
       void shutdownControlContext(context);
       logger.log("control ws closed", context.clientId);
     });
   });
 
-  terminalWss.on("connection", (socket) => {
-    const ctx: DataContext = { socket, authed: false };
+  terminalWss.on("connection", (socket, request) => {
+    const ctx: DataContext = { socket, authed: false, authInProgress: false };
     terminalClients.add(ctx);
     logger.log("terminal ws connected");
 
-    socket.on("message", (rawData, isBinary) => {
+    socket.on("message", async (rawData, isBinary) => {
       if (!ctx.authed) {
+        // Ignore messages while async auth (JWT verification) is in progress
+        if (ctx.authInProgress) {
+          return;
+        }
+
         if (isBinary) {
           socket.close(4001, "auth required");
           return;
@@ -455,6 +551,26 @@ export const createTmuxMobileServer = (
         if (!clientId) {
           socket.close(4001, "unauthorized");
           return;
+        }
+
+        // JWT verification path for terminal WS
+        if (authMessage.jwt && approvalService) {
+          ctx.authInProgress = true;
+          const jwtResult = await approvalService.verifyJwt(authMessage.jwt);
+          ctx.authInProgress = false;
+          if (jwtResult.valid) {
+            const controlContext = getControlContext(clientId);
+            if (!controlContext || !controlContext.authed) {
+              socket.close(4001, "unauthorized");
+              return;
+            }
+            ctx.authed = true;
+            ctx.controlClientId = clientId;
+            ctx.controlContext = controlContext;
+            controlContext.terminalClients.add(ctx);
+            logger.log("terminal ws jwt auth ok");
+            return;
+          }
         }
 
         const authResult = authService.verify({

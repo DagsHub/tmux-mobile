@@ -15,6 +15,7 @@ interface ServerConfig {
   passwordRequired: boolean;
   scrollbackLines: number;
   pollIntervalMs: number;
+  approvalEnabled: boolean;
 }
 
 type ModifierKey = "ctrl" | "alt" | "shift" | "meta";
@@ -95,6 +96,13 @@ export const App = () => {
   const [needsPasswordInput, setNeedsPasswordInput] = useState(false);
   const [passwordErrorMessage, setPasswordErrorMessage] = useState("");
   const [authReady, setAuthReady] = useState(false);
+
+  // Approval flow state
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [challengeCode, setChallengeCode] = useState("");
+  // JWT is stored in localStorage (accessible to JS on the page). This is acceptable here
+  // because the app is a single-origin terminal client with no third-party scripts.
+  const jwtRef = useRef<string | null>(localStorage.getItem("tmux-mobile-jwt"));
 
   const [snapshot, setSnapshot] = useState<TmuxStateSnapshot>({ sessions: [], capturedAt: "" });
   const [attachedSession, setAttachedSession] = useState<string>("");
@@ -283,16 +291,19 @@ export const App = () => {
     return reason;
   };
 
-  const openTerminalSocket = (passwordValue: string, clientId: string): void => {
-    debugLog("terminal_socket.open.begin", { hasPassword: Boolean(passwordValue) });
+  const openTerminalSocket = (passwordValue: string, clientId: string, jwtValue?: string | null): void => {
+    debugLog("terminal_socket.open.begin", { hasPassword: Boolean(passwordValue), hasJwt: Boolean(jwtValue) });
     terminalSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/terminal`);
     socket.onopen = () => {
-      debugLog("terminal_socket.onopen");
-      socket.send(
-        JSON.stringify({ type: "auth", token, password: passwordValue || undefined, clientId })
-      );
+      const authPayload: Record<string, unknown> = { type: "auth", token, clientId };
+      if (jwtValue) {
+        authPayload.jwt = jwtValue;
+      } else if (passwordValue) {
+        authPayload.password = passwordValue;
+      }
+      socket.send(JSON.stringify(authPayload));
       setStatusMessage("terminal connected");
       if (fitAddonRef.current && terminalRef.current) {
         fitAddonRef.current.fit();
@@ -323,15 +334,20 @@ export const App = () => {
     terminalSocketRef.current = socket;
   };
 
-  const openControlSocket = (passwordValue: string): void => {
-    debugLog("control_socket.open.begin", { hasPassword: Boolean(passwordValue) });
+  const openControlSocket = (passwordValue: string, jwtValue?: string | null): void => {
+    debugLog("control_socket.open.begin", { hasPassword: Boolean(passwordValue), hasJwt: Boolean(jwtValue) });
     controlSocketRef.current?.close();
 
     const socket = new WebSocket(`${wsOrigin}/ws/control`);
 
     socket.onopen = () => {
-      debugLog("control_socket.onopen");
-      socket.send(JSON.stringify({ type: "auth", token, password: passwordValue || undefined }));
+      const authPayload: Record<string, unknown> = { type: "auth", token };
+      if (jwtValue) {
+        authPayload.jwt = jwtValue;
+      } else if (passwordValue) {
+        authPayload.password = passwordValue;
+      }
+      socket.send(JSON.stringify(authPayload));
     };
 
     socket.onmessage = (event) => {
@@ -353,6 +369,7 @@ export const App = () => {
           setPasswordErrorMessage("");
           setAuthReady(true);
           setNeedsPasswordInput(false);
+          setPendingApproval(false);
           if (message.requiresPassword && passwordValue) {
             localStorage.setItem("tmux-mobile-password", passwordValue);
           } else {
@@ -360,10 +377,42 @@ export const App = () => {
           }
           openTerminalSocket(passwordValue, message.clientId);
           return;
+        case "auth_approved": {
+          // Store JWT, remove cleartext password
+          jwtRef.current = message.jwt;
+          localStorage.setItem("tmux-mobile-jwt", message.jwt);
+          localStorage.removeItem("tmux-mobile-password");
+          setErrorMessage("");
+          setPasswordErrorMessage("");
+          setAuthReady(true);
+          setNeedsPasswordInput(false);
+          setPendingApproval(false);
+          setChallengeCode("");
+          openTerminalSocket("", message.clientId, message.jwt);
+          return;
+        }
+        case "auth_pending":
+          setPendingApproval(true);
+          setChallengeCode(message.challengeCode);
+          setErrorMessage("");
+          setStatusMessage("Waiting for server approval...");
+          return;
+        case "auth_denied":
+          setPendingApproval(false);
+          setChallengeCode("");
+          setErrorMessage(message.reason);
+          setNeedsPasswordInput(true);
+          setPasswordErrorMessage("Connection denied. Enter password to connect.");
+          return;
         case "auth_error":
           debugLog("control_socket.auth_error", { reason: message.reason });
           setErrorMessage(message.reason);
           setAuthReady(false);
+          // If JWT auth failed, clear stored JWT and fall through
+          if (jwtValue) {
+            jwtRef.current = null;
+            localStorage.removeItem("tmux-mobile-jwt");
+          }
           const passwordAuthFailed =
             message.reason === "invalid password" || Boolean(serverConfig?.passwordRequired);
           if (passwordAuthFailed) {
@@ -456,7 +505,20 @@ export const App = () => {
         debugLog("config.fetch.ok", config);
         setServerConfig(config);
 
+        // Try JWT first if stored
+        const storedJwt = jwtRef.current;
+        if (storedJwt) {
+          openControlSocket("", storedJwt);
+          return;
+        }
+
+        // If password required and no password stored, show prompt
         if (config.passwordRequired && !password) {
+          // If approval is enabled and no password, connect without password to trigger approval
+          if (config.approvalEnabled) {
+            openControlSocket("");
+            return;
+          }
           debugLog("config.fetch.password_required");
           setNeedsPasswordInput(true);
           setPasswordErrorMessage("");
@@ -591,7 +653,16 @@ export const App = () => {
 
   const submitPassword = (): void => {
     setPasswordErrorMessage("");
+    setPendingApproval(false);
     openControlSocket(password);
+  };
+
+  const switchToPasswordEntry = (): void => {
+    setPendingApproval(false);
+    setChallengeCode("");
+    setNeedsPasswordInput(true);
+    setPasswordErrorMessage("");
+    controlSocketRef.current?.close();
   };
 
   const createSession = (): void => {
@@ -673,7 +744,7 @@ export const App = () => {
       </main>
 
       <section className="toolbar" onMouseUp={focusTerminal}>
-        {/* Row 1: Esc, Ctrl, Alt, Cmd, Meta, /, @, Hm, ↑, Ed */}
+        {/* Row 1: Esc, Ctrl, Alt, Cmd, Meta, /, @, Hm, up, Ed */}
         <div className="toolbar-main">
           <button onClick={() => sendTerminal("\u001b")}>Esc</button>
           <button className={`modifier ${modifiers.ctrl}`} onClick={() => toggleModifier("ctrl")}>Ctrl</button>
@@ -683,11 +754,11 @@ export const App = () => {
           <button onClick={() => sendTerminal("/")}>/</button>
           <button onClick={() => sendTerminal("@")}>@</button>
           <button onClick={() => sendTerminal("\u001b[H")}>Hm</button>
-          <button onClick={() => sendTerminal("\u001b[A")}>↑</button>
+          <button onClick={() => sendTerminal("\u001b[A")}>up</button>
           <button onClick={() => sendTerminal("\u001b[F")}>Ed</button>
         </div>
 
-        {/* Row 2: ^C, ^B, ^R, Sft, Tab, Enter, ..., ←, ↓, → */}
+        {/* Row 2: ^C, ^B, ^R, Sft, Tab, Enter, ..., left, down, right */}
         <div className="toolbar-main">
           <button className="danger" onClick={() => sendTerminal("\u0003", false)}>^C</button>
           <button onClick={() => sendTerminal("\u0002", false)}>^B</button>
@@ -706,9 +777,9 @@ export const App = () => {
           >
             {toolbarExpanded ? "..." : "..."}
           </button>
-          <button onClick={() => sendTerminal("\u001b[D")}>←</button>
-          <button onClick={() => sendTerminal("\u001b[B")}>↓</button>
-          <button onClick={() => sendTerminal("\u001b[C")}>→</button>
+          <button onClick={() => sendTerminal("\u001b[D")}>left</button>
+          <button onClick={() => sendTerminal("\u001b[B")}>down</button>
+          <button onClick={() => sendTerminal("\u001b[C")}>right</button>
         </div>
 
         {/* Expanded section (collapsible) */}
@@ -975,7 +1046,28 @@ export const App = () => {
         </div>
       )}
 
-      {needsPasswordInput && (
+      {pendingApproval && (
+        <div className="overlay" data-testid="approval-overlay">
+          <div className="card approval-card">
+            <h2>Waiting for Approval</h2>
+            <p className="approval-subtitle">
+              The server operator must approve this connection.
+            </p>
+            <div className="challenge-code" data-testid="challenge-code">
+              {challengeCode}
+            </div>
+            <p className="approval-hint">
+              Confirm this code matches what the server displays.
+            </p>
+            <div className="approval-spinner" />
+            <button onClick={switchToPasswordEntry}>
+              Enter Password Instead
+            </button>
+          </div>
+        </div>
+      )}
+
+      {needsPasswordInput && !pendingApproval && (
         <div className="overlay">
           <div className="card">
             <h2>Password Required</h2>
