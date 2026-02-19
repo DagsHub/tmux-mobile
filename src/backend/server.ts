@@ -77,10 +77,17 @@ const summarizeClientMessage = (message: ControlClientMessage): string => {
     return JSON.stringify({
       type: message.type,
       tokenPresent: Boolean(message.token),
-      passwordPresent: Boolean(message.password)
+      passwordPresent: Boolean(message.password),
+      clientIdPresent: Boolean(message.clientId)
     });
   }
-  return JSON.stringify(message);
+  if (message.type === "send_compose") {
+    return JSON.stringify({
+      type: message.type,
+      textLength: message.text.length
+    });
+  }
+  return JSON.stringify({ type: message.type });
 };
 
 const summarizeState = (state: TmuxStateSnapshot): string => {

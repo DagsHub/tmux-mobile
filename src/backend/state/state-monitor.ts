@@ -32,9 +32,18 @@ export class TmuxStateMonitor {
     // Cancel any pending tick and bump the generation so that an in-flight
     // tick whose buildSnapshot is still resolving will discard its result.
     clearTimeout(this.timer);
-    this.forceGeneration++;
-    await this.publishSnapshot(true);
-    this.scheduleNextTick();
+    this.timer = undefined;
+    const generation = ++this.forceGeneration;
+    try {
+      await this.publishSnapshot(true);
+    } catch (error) {
+      this.onError(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      // Only the latest concurrent forcePublish should schedule the next tick.
+      if (generation === this.forceGeneration) {
+        this.scheduleNextTick();
+      }
+    }
   }
 
   private scheduleNextTick(): void {

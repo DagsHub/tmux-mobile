@@ -8,8 +8,9 @@ const execFileAsync = promisify(execFile);
 
 const SESSION_FMT = "#{session_name}\t#{session_attached}\t#{session_windows}";
 const WINDOW_FMT = "#{window_index}\t#{window_name}\t#{window_active}\t#{window_panes}";
+const ACTIVE_PANE_ZOOM_FMT = "#{?#{&&:#{window_zoomed_flag},#{pane_active}},1,0}";
 const PANE_FMT =
-  "#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_active}\t#{pane_width}x#{pane_height}\t#{window_zoomed_flag}";
+  `#{pane_index}\t#{pane_id}\t#{pane_current_command}\t#{pane_active}\t#{pane_width}x#{pane_height}\t${ACTIVE_PANE_ZOOM_FMT}`;
 
 interface TmuxCliExecutorOptions {
   socketName?: string;
@@ -153,8 +154,8 @@ export class TmuxCliExecutor implements TmuxGateway {
   }
 
   public async isPaneZoomed(paneId: string): Promise<boolean> {
-    const output = await this.runTmux(["display-message", "-p", "-t", paneId, "#{window_zoomed_flag}"]);
-    return output.trim() === "1";
+    const output = await this.runTmux(["display-message", "-p", "-t", paneId, ACTIVE_PANE_ZOOM_FMT]);
+    return output === "1";
   }
 
   public async capturePane(paneId: string, lines: number): Promise<string> {

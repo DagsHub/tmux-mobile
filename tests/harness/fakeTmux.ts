@@ -106,7 +106,7 @@ export class FakeTmuxGateway implements TmuxGateway {
         active: pane.active,
         width: pane.width,
         height: pane.height,
-        zoomed: window.zoomed
+        zoomed: window.zoomed && pane.active
       }))
     );
   }
@@ -236,8 +236,8 @@ export class FakeTmuxGateway implements TmuxGateway {
 
   public async isPaneZoomed(paneId: string): Promise<boolean> {
     this.calls.push(`isPaneZoomed:${paneId}`);
-    const { window } = this.findByPane(paneId);
-    return window.zoomed;
+    const { window, pane } = this.findByPane(paneId);
+    return window.zoomed && pane.active;
   }
 
   public async capturePane(paneId: string, lines: number): Promise<string> {

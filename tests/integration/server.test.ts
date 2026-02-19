@@ -45,6 +45,20 @@ describe("tmux mobile server", () => {
     return { clientId: authOk.clientId, attachedSession: attached.session };
   };
 
+  const waitForTmuxCall = async (
+    predicate: (call: string) => boolean,
+    timeoutMs = 1_000
+  ): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (tmux.calls.some(predicate)) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("timed out waiting for expected tmux call");
+  };
+
   const startWithSessions = async (
     sessions: string[],
     options: { password?: string; attachedSession?: string; failSwitchClient?: boolean } = {}
@@ -266,7 +280,7 @@ describe("tmux mobile server", () => {
 
     // Split to create a second pane
     control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForTmuxCall((call) => call === `splitWindow:${paneId}:h`);
 
     const updatedSnapshot = await buildSnapshot(tmux);
     const secondPaneId = updatedSnapshot.sessions[0].windowStates[0].panes[1].id;
@@ -276,7 +290,7 @@ describe("tmux mobile server", () => {
 
     // Select the first pane with stickyZoom enabled
     control.send(JSON.stringify({ type: "select_pane", paneId, stickyZoom: true }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForTmuxCall((call) => call === `zoomPane:${paneId}`);
 
     expect(tmux.calls).toContain(`selectPane:${paneId}`);
     expect(tmux.calls).toContain(`zoomPane:${paneId}`);
@@ -284,7 +298,7 @@ describe("tmux mobile server", () => {
     // Clear and verify without stickyZoom
     tmux.calls.length = 0;
     control.send(JSON.stringify({ type: "select_pane", paneId: secondPaneId }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForTmuxCall((call) => call === `selectPane:${secondPaneId}`);
 
     expect(tmux.calls).toContain(`selectPane:${secondPaneId}`);
     expect(tmux.calls).not.toContain(`zoomPane:${secondPaneId}`);
@@ -305,20 +319,20 @@ describe("tmux mobile server", () => {
 
     // Split to create a second pane
     control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForTmuxCall((call) => call === `splitWindow:${paneId}:h`);
 
     const updatedSnapshot = await buildSnapshot(tmux);
     const secondPaneId = updatedSnapshot.sessions[0].windowStates[0].panes[1].id;
 
     // Pre-zoom the window
     control.send(JSON.stringify({ type: "zoom_pane", paneId }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForTmuxCall((call) => call === `zoomPane:${paneId}`);
 
     // Clear calls to isolate stickyZoom select behavior
     tmux.calls.length = 0;
 
     control.send(JSON.stringify({ type: "select_pane", paneId: secondPaneId, stickyZoom: true }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForTmuxCall((call) => call === `selectPane:${secondPaneId}`);
 
     expect(tmux.calls).toContain(`selectPane:${secondPaneId}`);
     expect(tmux.calls).not.toContain(`zoomPane:${secondPaneId}`);

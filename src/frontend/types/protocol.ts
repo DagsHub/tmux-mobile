@@ -32,7 +32,7 @@ export interface TmuxStateSnapshot {
 }
 
 export type ControlClientMessage =
-  | { type: "auth"; token?: string; password?: string }
+  | { type: "auth"; token?: string; password?: string; clientId?: string }
   | { type: "select_session"; session: string }
   | { type: "new_session"; name: string }
   | { type: "new_window"; session: string }
