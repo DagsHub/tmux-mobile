@@ -41,7 +41,7 @@ export const parsePanes = (raw: string): TmuxPaneState[] =>
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [index, id, currentCommand, active, dimensions] = splitLine(line);
+      const [index, id, currentCommand, active, dimensions, zoomed] = splitLine(line);
       const [width, height] = dimensions.split("x");
       return {
         index: Number.parseInt(index, 10),
@@ -49,6 +49,7 @@ export const parsePanes = (raw: string): TmuxPaneState[] =>
         currentCommand,
         active: active === "1",
         width: Number.parseInt(width, 10),
-        height: Number.parseInt(height, 10)
+        height: Number.parseInt(height, 10),
+        zoomed: zoomed === "1"
       };
     });

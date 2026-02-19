@@ -45,6 +45,20 @@ describe("tmux mobile server", () => {
     return { clientId: authOk.clientId, attachedSession: attached.session };
   };
 
+  const waitForTmuxCall = async (
+    predicate: (call: string) => boolean,
+    timeoutMs = 1_000
+  ): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (tmux.calls.some(predicate)) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("timed out waiting for expected tmux call");
+  };
+
   const startWithSessions = async (
     sessions: string[],
     options: { password?: string; attachedSession?: string; failSwitchClient?: boolean } = {}
@@ -250,6 +264,100 @@ describe("tmux mobile server", () => {
     expect(ptyFactory.latestProcess().writes).toContain("input-data");
 
     terminal.close();
+    control.close();
+  });
+
+  test("select_pane with stickyZoom calls both selectPane and zoomPane", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    await waitForMessage(control, (msg: { type: string }) => msg.type === "attached");
+
+    const snapshot = await buildSnapshot(tmux);
+    const paneId = snapshot.sessions[0].windowStates[0].panes[0].id;
+
+    // Split to create a second pane
+    control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
+    await waitForTmuxCall((call) => call === `splitWindow:${paneId}:h`);
+
+    const updatedSnapshot = await buildSnapshot(tmux);
+    const secondPaneId = updatedSnapshot.sessions[0].windowStates[0].panes[1].id;
+
+    // Clear calls to isolate the select_pane + stickyZoom behavior
+    tmux.calls.length = 0;
+
+    // Select the first pane with stickyZoom enabled
+    control.send(JSON.stringify({ type: "select_pane", paneId, stickyZoom: true }));
+    await waitForTmuxCall((call) => call === `zoomPane:${paneId}`);
+
+    expect(tmux.calls).toContain(`selectPane:${paneId}`);
+    expect(tmux.calls).toContain(`zoomPane:${paneId}`);
+
+    // Clear and verify without stickyZoom
+    tmux.calls.length = 0;
+    control.send(JSON.stringify({ type: "select_pane", paneId: secondPaneId }));
+    await waitForTmuxCall((call) => call === `selectPane:${secondPaneId}`);
+
+    expect(tmux.calls).toContain(`selectPane:${secondPaneId}`);
+    expect(tmux.calls).not.toContain(`zoomPane:${secondPaneId}`);
+
+    control.close();
+  });
+
+  test("select_pane with stickyZoom does not toggle zoom when window is already zoomed", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    control.send(JSON.stringify({ type: "auth", token: "test-token" }));
+    await waitForMessage(control, (msg: { type: string }) => msg.type === "attached");
+
+    const snapshot = await buildSnapshot(tmux);
+    const paneId = snapshot.sessions[0].windowStates[0].panes[0].id;
+
+    // Split to create a second pane
+    control.send(JSON.stringify({ type: "split_pane", paneId, orientation: "h" }));
+    await waitForTmuxCall((call) => call === `splitWindow:${paneId}:h`);
+
+    const updatedSnapshot = await buildSnapshot(tmux);
+    const secondPaneId = updatedSnapshot.sessions[0].windowStates[0].panes[1].id;
+
+    // Pre-zoom the window
+    control.send(JSON.stringify({ type: "zoom_pane", paneId }));
+    await waitForTmuxCall((call) => call === `zoomPane:${paneId}`);
+
+    // Clear calls to isolate stickyZoom select behavior
+    tmux.calls.length = 0;
+
+    control.send(JSON.stringify({ type: "select_pane", paneId: secondPaneId, stickyZoom: true }));
+    await waitForTmuxCall((call) => call === `selectPane:${secondPaneId}`);
+
+    expect(tmux.calls).toContain(`selectPane:${secondPaneId}`);
+    expect(tmux.calls).not.toContain(`zoomPane:${secondPaneId}`);
+
+    control.close();
+  });
+
+  test("select_window with stickyZoom zooms the target window active pane", async () => {
+    await runningServer.stop();
+    await startWithSessions(["main"]);
+
+    const control = await openSocket(`${baseWsUrl}/ws/control`);
+    const { attachedSession } = await authControl(control);
+
+    control.send(JSON.stringify({ type: "new_window", session: attachedSession }));
+    await waitForTmuxCall((call) => call === `newWindow:${attachedSession}`);
+
+    tmux.calls.length = 0;
+
+    control.send(JSON.stringify({ type: "select_window", session: attachedSession, windowIndex: 0, stickyZoom: true }));
+    await waitForTmuxCall((call) => call === `selectWindow:${attachedSession}:0`);
+
+    expect(tmux.calls).toContain(`selectWindow:${attachedSession}:0`);
+    expect(tmux.calls.some((call) => call.startsWith("zoomPane:"))).toBe(true);
+
     control.close();
   });
 
