@@ -23,6 +23,17 @@ export interface TmuxGateway {
   zoomPane(paneId: string): Promise<void>;
   isPaneZoomed(paneId: string): Promise<boolean>;
   capturePane(paneId: string, lines: number): Promise<string>;
+  renameSession(oldName: string, newName: string): Promise<void>;
+  renameWindow(session: string, windowIndex: number, newName: string): Promise<void>;
+  respawnPane(paneId: string): Promise<void>;
+  breakPane(paneId: string): Promise<void>;
+  swapWindow(session: string, srcIndex: number, dstIndex: number): Promise<void>;
+  setSessionDefaultDirectory(session: string, directory: string | null): Promise<void>;
+  setWindowDefaultDirectory(
+    session: string,
+    windowIndex: number,
+    directory: string | null
+  ): Promise<void>;
 }
 
 export const buildSnapshot = async (
