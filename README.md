@@ -54,6 +54,10 @@ The CLI prints:
 
 Open either URL directly on your phone.
 
+For a phone **spectator** that does not need a tunnel or inbound port, see
+[Build Remote Agent](docs/gbr.md) (`gbr-agent pair` / `run`). That is a
+companion pairing device, not a replacement for this UI.
+
 ### Run from source
 
 ```bash
